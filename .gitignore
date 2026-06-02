@@ -1,0 +1,25 @@
+# dependencies
+node_modules
+
+# next.js build output
+.next
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# secrets — NEVER commit (contains real API tokens)
+.env
+.env.local
+.env*.local
+
+# runtime output (real files written by the apps / MCP fs sandbox)
+app-output/
+mcp-workspace/
+
+# misc
+*.log
+.DS_Store
+.vercel
+
+# scratch test files
+_*.mts
+_*.mjs
