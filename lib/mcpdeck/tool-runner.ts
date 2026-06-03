@@ -16,16 +16,6 @@ export async function runMockTool(
 
   try {
     switch (toolId) {
-      case "fs.list":
-        return ok(mockFsList(String(args.path ?? "/workspace")));
-      case "fs.read":
-        return ok(mockFsRead(String(args.path ?? "")));
-      case "fs.write":
-        return ok(
-          `wrote ${String(args.path)} (${String(args.contents ?? "").length} bytes)`,
-        );
-      case "fs.search":
-        return ok(mockFsSearch(String(args.query ?? "")));
       case "git.status":
         return ok(
           [
@@ -111,26 +101,4 @@ function ok(s: string) {
 
 function wait(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function mockFsList(path: string): string {
-  if (path === "/workspace") return "src/\npackage.json\nREADME.md\ntsconfig.json";
-  if (path === "/workspace/src") return "index.ts\napp.ts\nlib/\ncomponents/";
-  return `(empty or path not found: ${path})`;
-}
-
-function mockFsRead(path: string): string {
-  if (path.endsWith("package.json"))
-    return `{\n  "name": "mini-bap",\n  "version": "0.1.0"\n}`;
-  if (path.endsWith("README.md"))
-    return `# mini-bap\n\nInteractive UI Responses prototype.`;
-  return `(${path} is 0 bytes or not readable in mock)`;
-}
-
-function mockFsSearch(query: string): string {
-  const hits = [
-    `src/app.ts:42  // ${query}`,
-    `lib/engine/run-engine.ts:88  ${query} pattern matched`,
-  ];
-  return hits.join("\n");
 }

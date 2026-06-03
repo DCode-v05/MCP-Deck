@@ -1,21 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Sparkles, Square, Play, Activity, CreditCard, HelpCircle, X, Wand2, Bot, LayoutGrid, PanelsTopLeft } from "lucide-react";
+import { Sparkles, Square, Play, Brain, CreditCard, HelpCircle, X, Wand2, Bot, LayoutGrid, PanelsTopLeft, History } from "lucide-react";
 import Link from "next/link";
-import { useMcpDeck } from "@/lib/hooks/useMcpDeck";
+import { useMcpDeck, type RunSummary } from "@/lib/hooks/useMcpDeck";
 import { ServerPanel } from "./ServerPanel";
 import { ToolInspector } from "./ToolInspector";
-import { ResourceBrowser } from "./ResourceBrowser";
-import { ReplayTimeline } from "./ReplayTimeline";
-import { ActivityStream } from "./ActivityStream";
+import { ModelProcessing } from "./ModelProcessing";
 import { UsageDashboard } from "./UsageDashboard";
 import { AppsMode } from "./apps/AppsMode";
-import { SAMPLE_GOALS } from "@/lib/mcpdeck/sample-goals";
-import { useCraftAuthor } from "@/lib/hooks/useCraftAuthor";
-import { CraftRenderer } from "@/components/crafts/CraftRenderer";
 
-type Tab = "activity" | "usage";
+type Tab = "processing" | "usage";
 type Mode = "agent" | "apps";
 
 export function McpDeckPanel() {
@@ -23,15 +18,13 @@ export function McpDeckPanel() {
     state,
     start,
     stop,
+    loadRun,
     resolveApproval,
     toggleServer,
     pinTool,
-    expandResource,
-    replay,
-    branch,
   } = useMcpDeck();
   const [goal, setGoal] = useState("");
-  const [tab, setTab] = useState<Tab>("activity");
+  const [tab, setTab] = useState<Tab>("processing");
   const [mode, setMode] = useState<Mode>("agent");
   const [railsOpen, setRailsOpen] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -50,23 +43,16 @@ export function McpDeckPanel() {
     return set;
   }, [state.servers]);
 
-  const [liveUI, setLiveUI] = useState(true);
-  const { crafts, authoring, error: craftError, author, replace } = useCraftAuthor();
-
   const isRunning =
     state.status === "running" ||
     state.status === "awaiting_input" ||
     state.status === "starting";
 
+  // Every prompt runs the multi-step agent across the connected apps.
   const submit = (text: string) => {
-    if (!text.trim() || isRunning || authoring) return;
-    if (liveUI) {
-      // §1–5: the engine AUTHORS live UI for this request instead of plain text.
-      void author(text.trim());
-      setGoal(""); // clear the composer once submitted
-    } else {
-      void start(text.trim());
-    }
+    if (!text.trim() || isRunning) return;
+    void start(text.trim());
+    setGoal("");
   };
 
   return (
@@ -74,10 +60,6 @@ export function McpDeckPanel() {
       {/* Header */}
       <header className="border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-md px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/apps" className="text-[var(--secondary)] hover:text-accent text-[11px] font-mono">
-            ← apps
-          </Link>
-          <span className="h-3.5 w-px bg-[var(--border)]" />
           <Sparkles className="h-5 w-5 text-accent" strokeWidth={1.5} />
           <h1 className="font-display text-xl font-bold tracking-tight">McpDeck</h1>
           <StatusPill status={state.status} />
@@ -115,15 +97,15 @@ export function McpDeckPanel() {
           {mode === "agent" && (
             <>
               <Link
-                href="/apps/mcpdeck/generate"
+                href="/generate"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[12px] font-medium text-white bg-accent hover:bg-accent/90 mr-1"
                 title="Let the engine generate a live MCP app from a prompt"
               >
                 <Wand2 className="h-3.5 w-3.5" strokeWidth={2} />
                 Generate app
               </Link>
-              <TabButton active={tab === "activity"} onClick={() => setTab("activity")} icon={Activity}>
-                Activity
+              <TabButton active={tab === "processing"} onClick={() => setTab("processing")} icon={Brain}>
+                Model Processing
               </TabButton>
               <TabButton active={tab === "usage"} onClick={() => setTab("usage")} icon={CreditCard}>
                 Usage
@@ -152,11 +134,12 @@ export function McpDeckPanel() {
       {mode === "agent" && (
       <div
         className="flex-1 grid min-h-0"
-        style={{ gridTemplateColumns: railsOpen ? "260px 1fr 280px" : "1fr" }}
+        style={{ gridTemplateColumns: railsOpen ? "260px 1fr" : "1fr" }}
       >
         {/* Left rail */}
         {railsOpen && (
         <aside className="border-r border-[var(--border)] overflow-y-auto p-2.5 space-y-3">
+          <HistoryList runs={state.history} activeId={state.sessionId} onSelect={loadRun} />
           <ServerPanel
             catalogue={state.catalogue.servers}
             state={state.servers}
@@ -171,82 +154,37 @@ export function McpDeckPanel() {
         </aside>
         )}
 
-        {/* Center: live crafts (Live UI) OR activity OR usage, + goal input */}
+        {/* Center: the Model Processing trace (or Usage) + the goal input */}
         <main className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto">
             {tab === "usage" ? (
               <UsageDashboard usage={state.usageStats} servers={state.catalogue.servers} />
-            ) : liveUI && (crafts.length > 0 || authoring || craftError) ? (
-              <div className="max-w-3xl mx-auto px-4 py-4 space-y-5">
-                {crafts.map(({ block, prose, request }) => (
-                  <div key={block.id} className="space-y-2">
-                    {/* the user's request, chat-style */}
-                    <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-accent/10 border border-accent/20 px-3.5 py-2 text-[13px] leading-snug">
-                        {request}
-                      </div>
-                    </div>
-                    {/* the engine's authored live UI */}
-                    {prose && <p className="text-[13px] text-[var(--secondary)] leading-relaxed">{prose}</p>}
-                    <CraftRenderer block={block} onEdited={replace} providerId="sonnet" />
-                  </div>
-                ))}
-                {authoring && (
-                  <div className="flex items-center gap-2 text-[13px] text-[var(--secondary)]">
-                    <Sparkles className="h-4 w-4 text-accent animate-pulse" />
-                    The engine is authoring a live UI…
-                  </div>
-                )}
-                {craftError && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-[12px] text-red-700 dark:text-red-300">
-                    {craftError}
-                  </div>
-                )}
-              </div>
             ) : (
-              <ActivityStream
-                activity={state.activity}
+              <ModelProcessing
+                traces={state.traces}
                 pending={state.pending}
+                crafts={state.crafts}
                 toolsById={toolsById}
                 onResolve={resolveApproval}
               />
             )}
           </div>
           <div className="border-t border-[var(--border)] bg-[var(--surface)]/80 px-4 py-3 space-y-2">
-            {/* Sample prompts as compact chips — only while idle, so they never crowd a run. */}
-            {!isRunning && state.activity.length === 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {SAMPLE_GOALS.map((g) => (
-                  <button
-                    key={g.text}
-                    onClick={() => {
-                      setGoal(g.text);
-                      submit(g.text);
-                    }}
-                    title={`Run · uses ${g.server}`}
-                    className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full border border-[var(--border)] text-[12px] hover:border-accent/50 hover:bg-accent/5 transition-colors"
-                  >
-                    <Play className="h-2.5 w-2.5 text-accent shrink-0" strokeWidth={2.5} />
-                    <span className="truncate">{firstClause(g.text)}</span>
-                    <span className="font-mono text-[9px] text-[var(--secondary)] shrink-0">{g.server}</span>
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="flex items-end gap-2">
               <textarea
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
-                placeholder={liveUI ? "Describe a live UI to build…" : "Give the agent a goal…"}
+                placeholder="Give the agent a goal across your apps… e.g. resolve the issues assigned to me"
                 rows={2}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  // Enter sends; Shift+Enter inserts a newline.
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     submit(goal);
                   }
                 }}
                 className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm leading-relaxed resize-none focus:outline-none focus:border-accent disabled:opacity-50"
-                disabled={isRunning || authoring}
+                disabled={isRunning}
               />
               {isRunning ? (
                 <button
@@ -259,43 +197,21 @@ export function McpDeckPanel() {
               ) : (
                 <button
                   onClick={() => submit(goal)}
-                  disabled={!goal.trim() || authoring}
+                  disabled={!goal.trim()}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-40 hover:bg-accent/90"
                 >
                   <Play className="h-3.5 w-3.5" strokeWidth={2} />
-                  {liveUI ? "Run" : "Run"}
+                  Run
                 </button>
               )}
             </div>
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setLiveUI((v) => !v)}
-                className={`inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors ${
-                  liveUI
-                    ? "border-accent/40 text-accent bg-accent/5"
-                    : "border-[var(--border)] text-[var(--secondary)]"
-                }`}
-                title="Live UI: the engine authors an interactive widget for your request instead of plain text."
-              >
-                <Sparkles className="h-3 w-3" />
-                Live UI {liveUI ? "on" : "off"}
-              </button>
+            <div className="flex items-center justify-end">
               <span className="text-[10px] font-mono text-[var(--secondary)]">
-                {liveUI
-                  ? "⌘/Ctrl + Enter · engine authors a live widget bound to real tools"
-                  : "⌘/Ctrl + Enter · agent loop, pauses for approval per tool call"}
+                Enter to send · Shift+Enter for newline · reads run automatically · writes ask approval
               </span>
             </div>
           </div>
         </main>
-
-        {/* Right rail */}
-        {railsOpen && (
-        <aside className="border-l border-[var(--border)] overflow-y-auto p-2.5 space-y-3">
-          <ResourceBrowser nodes={state.resources} onExpand={expandResource} />
-          <ReplayTimeline entries={state.replay} onReplay={replay} onBranch={branch} busy={isRunning} />
-        </aside>
-        )}
       </div>
       )}
     </div>
@@ -326,12 +242,6 @@ function TabButton({
       {children}
     </button>
   );
-}
-
-/** First sentence/clause of a sample goal, for a compact chip label. */
-function firstClause(text: string): string {
-  const cut = text.search(/[,.]|\band\b/);
-  return cut > 12 ? text.slice(0, cut).trim() : text;
 }
 
 function ModeButton({
@@ -375,23 +285,23 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="text-[13px] leading-relaxed text-[var(--secondary)]">
-          A live cockpit for an AI agent that uses <strong>MCP tools</strong>. You give it a goal;
-          it works toward it by calling tools — but <strong>pauses for your approval before every
-          call</strong>. You can edit the arguments, approve, deny, or auto-approve a tool for the
-          session.
+          An autonomous agent that <strong>orchestrates across your connected apps</strong> (GitHub,
+          Notion, Linear, Slack) as one system — resolving ids in one app and acting in the next.
+          <strong> Reads run automatically; it pauses for your approval before each write.</strong>
         </p>
         <ol className="text-[13px] space-y-2">
-          <HelpLine n={1}>Pick a sample goal (or type one) and press Start.</HelpLine>
+          <HelpLine n={1}>Type a goal (e.g. &ldquo;resolve the issues assigned to me&rdquo;) and press Run.</HelpLine>
           <HelpLine n={2}>
-            Watch the <strong>Activity</strong> tab — the agent narrates, then a red approval card
-            appears for each tool call.
+            Watch <strong>Model Processing</strong> — its reasoning and every tool it uses across apps,
+            live. Reads run on their own.
           </HelpLine>
           <HelpLine n={3}>
-            Approve / edit / deny. The agent resumes the instant you decide.
+            A <strong>write</strong> (create / update / comment / commit / PR) shows an approval card —
+            edit the args, approve, or deny. The agent resumes the instant you decide.
           </HelpLine>
           <HelpLine n={4}>
-            Steer mid-run from the rails: toggle a <strong>server</strong> off, <strong>pin</strong>{" "}
-            a tool, expand a <strong>resource</strong>.
+            It can render a <strong>live editable panel</strong> for results, bound to the real tools
+            (auto-refreshing, auto-saving).
           </HelpLine>
           <HelpLine n={5}>
             Check the <strong>Usage</strong> tab for live request counts, cost, and per-server data
@@ -403,7 +313,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           </HelpLine>
         </ol>
         <p className="text-[11px] text-[var(--secondary)] leading-relaxed border-t border-[var(--border)] pt-3">
-          With <code>MCPDECK_SERVERS</code> set, the servers are <strong>real</strong> (fs, GitHub, Notion,
+          With <code>MCPDECK_SERVERS</code> set, the servers are <strong>real</strong> (GitHub, Notion,
           Linear, Slack). Switch to <strong>Apps</strong> mode for live read-only dashboards bound to those
           servers through the shared channel poll loop — that&apos;s the bidirectional part.
         </p>
@@ -427,6 +337,63 @@ function HelpLine({ n, children }: { n: number; children: React.ReactNode }) {
       <span className="leading-relaxed">{children}</span>
     </li>
   );
+}
+
+function HistoryList({
+  runs,
+  activeId,
+  onSelect,
+}: {
+  runs: RunSummary[];
+  activeId: string | null;
+  onSelect: (sessionId: string) => void;
+}) {
+  if (runs.length === 0) return null;
+  return (
+    <div>
+      <h3 className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.25em] font-mono text-[var(--secondary)] mb-2 px-1">
+        <History className="h-3 w-3" strokeWidth={1.8} /> History
+      </h3>
+      <div className="space-y-0.5">
+        {runs.map((r) => (
+          <button
+            key={r.sessionId}
+            onClick={() => onSelect(r.sessionId)}
+            title={r.goal}
+            className={`w-full text-left rounded-md px-2 py-1.5 border transition-colors ${
+              r.sessionId === activeId
+                ? "border-accent/40 bg-accent/5"
+                : "border-transparent hover:bg-[var(--surface-2)]"
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot(r.status)}`} />
+              <span className="text-[12px] truncate">{r.goal}</span>
+            </div>
+            <div className="text-[9px] font-mono text-[var(--secondary)] pl-3 mt-0.5">
+              {relTime(r.startedAt)}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function statusDot(status: string): string {
+  if (status === "running" || status === "awaiting_input" || status === "starting") return "bg-amber-500";
+  if (status === "error") return "bg-red-500";
+  return "bg-emerald-500";
+}
+
+function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function StatusPill({ status }: { status: ReturnType<typeof useMcpDeck>["state"]["status"] }) {
@@ -461,7 +428,7 @@ function ProviderBadge({ kind }: { kind: "mock" | "real" | null }) {
       title={
         real
           ? "Connected to real MCP servers over stdio (MCPDECK_SERVERS)."
-          : "Built-in mock servers (fs/git/linear). Set MCPDECK_SERVERS to connect real MCP servers."
+          : "Built-in mock servers (git/linear). Set MCPDECK_SERVERS to connect real MCP servers."
       }
     >
       {real ? "live mcp" : "mock"}

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type {
   ApprovalVerdict,
-  EngineThought,
   McpDeckEvent,
   McpResourceNode,
   McpServerInfo,
@@ -15,22 +14,36 @@ import type {
   UpstreamMessage,
   UsageStats,
 } from "@/lib/mcpdeck/types";
+import type { CraftBlock } from "@/lib/crafts/craft-block";
 
-export interface ActivityLine {
-  id: string;
-  ts: number;
-  kind:
-    | "iteration"
-    | "text"
-    | "tool_started"
-    | "tool_completed"
-    | "log"
-    | "approval"
-    | "thought"
-    | "done";
-  text: string;
-  level?: "info" | "warn" | "error";
-  thought?: EngineThought;
+/**
+ * A single entry in the "Model Processing" trace: the model's reasoning, a tool
+ * it used (with args + result), a live panel it rendered, or the final outcome.
+ */
+export type TraceItem =
+  | { id: string; ts: number; kind: "reasoning"; text: string }
+  | {
+      id: string;
+      ts: number;
+      kind: "tool";
+      replayId: string;
+      toolId: string;
+      serverId: string;
+      args: Record<string, unknown>;
+      status: "running" | "ok" | "error";
+      result?: string;
+      write: boolean;
+    }
+  | { id: string; ts: number; kind: "craft"; blockId: string; title: string }
+  | { id: string; ts: number; kind: "done"; text: string; level: "info" | "error" };
+
+/** One past agent run, for the conversation-history list. */
+export interface RunSummary {
+  sessionId: string;
+  goal: string;
+  startedAt: number;
+  status: string;
+  summary: string | null;
 }
 
 export interface McpDeckState {
@@ -45,7 +58,10 @@ export interface McpDeckState {
   resources: McpResourceNode[];
   replay: ReplayEntry[];
   pending: PendingApproval[];
-  activity: ActivityLine[];
+  traces: TraceItem[];
+  crafts: CraftBlock[];
+  /** Past runs in this process (persists across reloads until dev restarts). */
+  history: RunSummary[];
   usage: { inputTokens: number; outputTokens: number; totalCost: number } | null;
   usageStats: UsageStats | null;
   finalSummary: string | null;
@@ -64,7 +80,9 @@ const INITIAL_STATE: McpDeckState = {
   resources: [],
   replay: [],
   pending: [],
-  activity: [],
+  traces: [],
+  crafts: [],
+  history: [],
   usage: null,
   usageStats: null,
   finalSummary: null,
@@ -75,12 +93,16 @@ type Action =
   | { kind: "reset" }
   | { kind: "set_status"; status: McpDeckState["status"] }
   | { kind: "set_catalogue"; servers: McpServerInfo[]; tools: McpToolInfo[]; providerKind: "mock" | "real" }
+  | { kind: "set_history"; runs: RunSummary[] }
   | { kind: "event"; ev: McpDeckEvent };
 
 function reducer(state: McpDeckState, action: Action): McpDeckState {
   switch (action.kind) {
     case "reset":
-      return { ...INITIAL_STATE, catalogue: state.catalogue };
+      // Keep the catalogue and the history list across a reset.
+      return { ...INITIAL_STATE, catalogue: state.catalogue, history: state.history };
+    case "set_history":
+      return { ...state, history: action.runs };
     case "set_status":
       return { ...state, status: action.status };
     case "set_catalogue":
@@ -109,11 +131,6 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
         ...state,
         status: "awaiting_input",
         pending: [...state.pending.filter((p) => p.requestId !== ev.pending.requestId), ev.pending],
-        activity: pushActivity(state.activity, {
-          kind: "approval",
-          text: `Approval requested: ${ev.pending.toolId}`,
-          level: "info",
-        }),
       };
     case "approval_resolved": {
       const remaining = state.pending.filter((p) => p.requestId !== ev.requestId);
@@ -137,12 +154,18 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
         startedAt: Date.now(),
         completedAt: null,
       };
+      const write = state.catalogue.tools.find((t) => t.id === ev.toolId)?.hasSideEffect ?? false;
       return {
         ...state,
         replay: [...state.replay, entry],
-        activity: pushActivity(state.activity, {
-          kind: "tool_started",
-          text: `→ ${ev.toolId} ${shortArgs(ev.args)}`,
+        traces: pushTrace(state.traces, {
+          kind: "tool",
+          replayId: ev.replayId,
+          toolId: ev.toolId,
+          serverId: ev.serverId,
+          args: ev.args,
+          status: "running",
+          write,
         }),
       };
     }
@@ -152,38 +175,29 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
           ? { ...r, result: ev.result, isError: ev.isError, completedAt: Date.now() }
           : r,
       );
-      return {
-        ...state,
-        replay,
-        activity: pushActivity(state.activity, {
-          kind: "tool_completed",
-          text: `← ${preview(ev.result)}${ev.isError ? "  [error]" : ""}`,
-          level: ev.isError ? "error" : undefined,
-        }),
-      };
+      const traces = state.traces.map((t) =>
+        t.kind === "tool" && t.replayId === ev.replayId
+          ? { ...t, status: ev.isError ? ("error" as const) : ("ok" as const), result: clip(ev.result, 1200) }
+          : t,
+      );
+      return { ...state, replay, traces };
     }
     case "engine_text":
-      return {
-        ...state,
-        activity: appendOrPushText(state.activity, ev.text),
-      };
+      return { ...state, traces: appendReasoning(state.traces, ev.text) };
     case "engine_iteration":
-      return {
-        ...state,
-        iteration: ev.iteration,
-        goal: ev.goal,
-        activity: ev.iteration === 0 ? state.activity : pushActivity(state.activity, {
-          kind: "iteration",
-          text: `— iteration ${ev.iteration} —`,
-        }),
-      };
+      return { ...state, iteration: ev.iteration, goal: ev.goal };
     case "engine_thought":
+      // The model's own narration (engine_text) is the visible reasoning; the
+      // system-generated intent is not surfaced as a separate trace.
+      return state;
+    case "craft":
       return {
         ...state,
-        activity: pushActivity(state.activity, {
-          kind: "thought",
-          text: ev.thought.intent,
-          thought: ev.thought,
+        crafts: [...state.crafts.filter((c) => c.id !== ev.block.id), ev.block],
+        traces: pushTrace(state.traces, {
+          kind: "craft",
+          blockId: ev.block.id,
+          title: ev.block.payload.title,
         }),
       };
     case "engine_done":
@@ -191,20 +205,16 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
         ...state,
         status: ev.reason === "error" ? "error" : "completed",
         finalSummary: ev.summary,
-        activity: pushActivity(state.activity, {
+        traces: pushTrace(state.traces, {
           kind: "done",
-          text: ev.summary ?? (ev.reason === "stopped" ? "stopped" : "done"),
+          text: ev.summary ?? (ev.reason === "stopped" ? "Stopped." : "Done."),
           level: ev.reason === "error" ? "error" : "info",
         }),
       };
     case "usage":
       return {
         ...state,
-        usage: {
-          inputTokens: ev.inputTokens,
-          outputTokens: ev.outputTokens,
-          totalCost: ev.totalCost,
-        },
+        usage: { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, totalCost: ev.totalCost },
       };
     case "usage_state":
       return {
@@ -217,58 +227,44 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
         },
       };
     case "log":
-      return {
-        ...state,
-        activity: pushActivity(state.activity, {
-          kind: "log",
-          text: ev.message,
-          level: ev.level,
-        }),
-      };
+      // Logs (retries, info) are kept out of the trace to keep it readable.
+      return state;
     case "error":
       return {
         ...state,
         status: "error",
         error: ev.message,
-        activity: pushActivity(state.activity, {
-          kind: "log",
-          text: ev.message,
-          level: "error",
-        }),
+        traces: pushTrace(state.traces, { kind: "done", text: ev.message, level: "error" }),
       };
   }
 }
 
-function pushActivity(
-  prev: ActivityLine[],
-  partial: Omit<ActivityLine, "id" | "ts">,
-): ActivityLine[] {
-  const next: ActivityLine = {
+// Distribute the Omit across the union so each variant keeps its own fields
+// (a plain Omit<Union, K> collapses to the shared `kind` property only).
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+function pushTrace(prev: TraceItem[], partial: DistributiveOmit<TraceItem, "id" | "ts">): TraceItem[] {
+  const next = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     ts: Date.now(),
     ...partial,
-  };
+  } as TraceItem;
   const arr = [...prev, next];
   return arr.length > 400 ? arr.slice(arr.length - 400) : arr;
 }
 
-function appendOrPushText(prev: ActivityLine[], text: string): ActivityLine[] {
+/** Stream reasoning text into the last reasoning item, or start a new one. */
+function appendReasoning(prev: TraceItem[], text: string): TraceItem[] {
   const last = prev[prev.length - 1];
-  if (last && last.kind === "text") {
-    const merged: ActivityLine = { ...last, text: last.text + text };
+  if (last && last.kind === "reasoning") {
+    const merged: TraceItem = { ...last, text: last.text + text };
     return [...prev.slice(0, -1), merged];
   }
-  return pushActivity(prev, { kind: "text", text });
+  return pushTrace(prev, { kind: "reasoning", text });
 }
 
-function preview(s: string): string {
-  const flat = s.replace(/\s+/g, " ").trim();
-  return flat.length > 120 ? `${flat.slice(0, 120)}…` : flat;
-}
-
-function shortArgs(args: Record<string, unknown>): string {
-  const s = JSON.stringify(args);
-  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+function clip(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
 async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<McpDeckEvent> {
@@ -330,6 +326,16 @@ export function useMcpDeck() {
     };
   }, []);
 
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mcpdeck/history");
+      const data = (await res.json()) as { runs: RunSummary[] };
+      dispatch({ kind: "set_history", runs: data.runs });
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const send = useCallback(async (message: UpstreamMessage) => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
@@ -359,16 +365,58 @@ export function useMcpDeck() {
       }
       const sessionId = res.headers.get("X-Session-Id");
       if (sessionId) sessionIdRef.current = sessionId;
+      void fetchHistory(); // the new run shows in history immediately
 
       for await (const ev of parseSse(res.body)) {
         if (ev.type === "session_ready") sessionIdRef.current = ev.sessionId;
         dispatch({ kind: "event", ev });
       }
+      void fetchHistory(); // refresh status/summary when it finishes
     } catch (err) {
       if (ctrl.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
       dispatch({ kind: "event", ev: { type: "error", message: msg } });
+      void fetchHistory();
     }
+  }, [fetchHistory]);
+
+  // Re-open a past run's session and replay its buffered events to rebuild the
+  // trace (read-only view; the engine is NOT re-run).
+  const loadRun = useCallback(async (sessionId: string) => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    dispatch({ kind: "reset" });
+    dispatch({ kind: "set_status", status: "starting" });
+    sessionIdRef.current = sessionId;
+    try {
+      const res = await fetch(`/api/mcpdeck/stream?sessionId=${encodeURIComponent(sessionId)}`, {
+        signal: ctrl.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+      for await (const ev of parseSse(res.body)) {
+        if (ctrl.signal.aborted) break;
+        dispatch({ kind: "event", ev });
+      }
+    } catch {
+      /* aborted or the session is gone */
+    }
+  }, []);
+
+  // On mount: load the run history and restore the most recent conversation so a
+  // reload doesn't lose it (persists until the dev server restarts).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/mcpdeck/history");
+        const data = (await res.json()) as { runs: RunSummary[] };
+        dispatch({ kind: "set_history", runs: data.runs });
+        if (data.runs.length > 0) void loadRun(data.runs[0].sessionId);
+      } catch {
+        /* ignore */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resolveApproval = useCallback(
@@ -404,6 +452,7 @@ export function useMcpDeck() {
     state,
     start,
     stop,
+    loadRun,
     resolveApproval,
     toggleServer,
     pinTool,

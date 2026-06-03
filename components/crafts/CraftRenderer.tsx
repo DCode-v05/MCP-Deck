@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Shield, X, ArrowRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useChannel } from "@/lib/hooks/useChannel";
 import { sanitizeCraftHtml, type CraftAction, type CraftBlock } from "@/lib/crafts/craft-block";
 import type { ChannelBinding } from "@/lib/channels/wire";
@@ -11,9 +11,12 @@ import type { ChannelBinding } from "@/lib/channels/wire";
  *  - renders the engine-authored HTML (sanitized, injected via ref so React
  *    never re-touches the inner DOM),
  *  - subscribes the craft's subscribe[] channels (live data IN) and fills
- *    [data-craft-bind] targets each tick — NO engine reasoning per tick,
- *  - routes [data-craft-emit] clicks (data OUT): route:direct -> channel request
- *    (with an approval gate for writes); route:engine -> /api/execute (resume).
+ *    [data-craft-bind] targets each tick — NO engine reasoning per tick, so the
+ *    view AUTO-REFRESHES on the poll cadence (no manual Refresh button),
+ *  - AUTO-SAVES editable fields (data OUT): when a [data-craft-input] changes and
+ *    the user pauses (~1s) or blurs, the matching route:direct write fires on its
+ *    own — no Save button, no approval modal. route:engine actions resume the
+ *    thread via /api/execute.
  */
 export function CraftRenderer({
   block,
@@ -26,7 +29,6 @@ export function CraftRenderer({
 }) {
   const p = block.payload;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [pending, setPending] = useState<CraftAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -62,6 +64,12 @@ export function CraftRenderer({
     const el = containerRef.current;
     if (!el) return;
     el.innerHTML = sanitizeCraftHtml(p.content);
+    // Seed the dirty-tracking baseline for whole-craft inputs (e.g. a page title
+    // authored with value="…") so auto-save fires only on a real change.
+    el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-craft-input]").forEach((node) => {
+      if (node.closest("[data-craft-row]")) return; // row inputs are seeded on render
+      node.dataset.craftCommitted = node.value;
+    });
   }, [p.content, p.version]);
 
   // Live data -> fill [data-craft-bind="<as>"] targets each tick.
@@ -112,6 +120,41 @@ export function CraftRenderer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.actions, p.version]);
 
+  // AUTO-SAVE: an editable field commits on its own ~1s after the last keystroke,
+  // or immediately on blur — no Save button, no approval modal.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const timers = new Map<HTMLElement, ReturnType<typeof setTimeout>>();
+    const commit = (input: HTMLInputElement | HTMLTextAreaElement) => {
+      timers.delete(input);
+      if ((input.dataset.craftCommitted ?? "") === input.value) return; // unchanged
+      void autoSave(input);
+    };
+    const queue = (e: Event) => {
+      const input = (e.target as HTMLElement | null)?.closest<HTMLInputElement>("[data-craft-input]");
+      if (!input) return;
+      const prev = timers.get(input);
+      if (prev) clearTimeout(prev);
+      timers.set(input, setTimeout(() => commit(input), 1000));
+    };
+    const flush = (e: Event) => {
+      const input = (e.target as HTMLElement | null)?.closest<HTMLInputElement>("[data-craft-input]");
+      if (!input) return;
+      const prev = timers.get(input);
+      if (prev) clearTimeout(prev);
+      commit(input);
+    };
+    el.addEventListener("input", queue);
+    el.addEventListener("blur", flush, true); // capture: blur doesn't bubble
+    return () => {
+      el.removeEventListener("input", queue);
+      el.removeEventListener("blur", flush, true);
+      for (const t of timers.values()) clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.actions, p.version]);
+
   // Is this action just re-reading a channel the craft already subscribes to?
   // (e.g. a "Refresh" button whose op == the subscribed list tool). Then it's a
   // live re-poll, not a detached call.
@@ -120,37 +163,61 @@ export function CraftRenderer({
   }
 
   async function fire(action: CraftAction) {
-    // A WRITE (side-effect) always asks first — the human gate (§6 safety).
-    if (action.hasSideEffect) {
-      setPending(action);
-      return;
-    }
+    // Auto-save, no confirm: writes run directly (no approval modal). The data
+    // motion is symmetric — reads auto-poll in, edits auto-save out.
     await run(action);
   }
 
-  async function run(action: CraftAction) {
+  // Auto-save: find the route:direct write that owns an edited field, fire it
+  // with that field's row id + scoped inputs, and mark the field saved.
+  async function autoSave(input: HTMLInputElement | HTMLTextAreaElement) {
+    const rowEl = input.closest<HTMLElement>("[data-craft-row]");
+    let action: CraftAction | undefined;
+    let finalArgs: Record<string, unknown> | undefined;
+    if (rowEl) {
+      // Per-row list: the save action carries a late-bound row id (idArg).
+      action = p.actions.find((a) => a.idArg && a.route === "direct" && a.op);
+      if (action?.idArg) {
+        finalArgs = structuredClone(action.args ?? {});
+        setPath(finalArgs, action.idArg, rowEl.dataset.rowId ?? "");
+        deepMerge(finalArgs, collectRowInputs(rowEl));
+      }
+    } else {
+      // Whole-craft single entity (e.g. a page title): the write with no row id.
+      action = p.actions.find((a) => a.hasSideEffect && !a.idArg && a.route === "direct" && a.op);
+      if (action) finalArgs = deepMerge(structuredClone(action.args ?? {}), collectInputs());
+    }
+    if (!action || !finalArgs) return; // no write tool to save this field into
+    const ok = await run({ ...action, args: finalArgs, _argsFinal: true }, { auto: true });
+    if (ok) input.dataset.craftCommitted = input.value;
+  }
+
+  async function run(action: CraftAction, opts?: { auto?: boolean }): Promise<boolean> {
     setBusy(true);
-    setPending(null);
+    if (opts?.auto) setToast("Saving…");
+    let ok = false;
     try {
       if (action.route === "direct" && isRefreshOf(action)) {
         // Live re-poll: force the subscribed channels to poll NOW; fresh data
         // (e.g. a repo created elsewhere) fans back over the open SSE.
         await refresh();
         setToast("Refreshed ✓");
+        ok = true;
       } else if (action.route === "direct" && action.channel && action.op) {
         // A real route:direct call (often a WRITE). If the args were already fully
-        // assembled per-row (id + that row's inputs), use them verbatim; otherwise
-        // deep-merge the whole-craft input fields over the authored template.
+        // assembled (per-row id + inputs, or auto-save), use them verbatim;
+        // otherwise deep-merge the whole-craft input fields over the template.
         const args = action._argsFinal
           ? (action.args ?? {})
           : deepMerge(structuredClone(action.args ?? {}), collectInputs());
         const res = (await request(action.channel, action.op, args)) as { isError?: boolean };
         if (res?.isError) {
-          setToast("Action failed.");
+          setToast(opts?.auto ? "Save failed." : "Action failed.");
         } else {
           // To-and-fro: the asset changed -> re-poll so the live view reflects it.
           await refresh();
-          setToast(`${action.label ?? action.name} ✓`);
+          setToast(opts?.auto ? "Saved ✓" : `${action.label ?? action.name} ✓`);
+          ok = true;
         }
       } else {
         // route:engine — resume the thread; the engine re-authors version+1.
@@ -168,13 +235,15 @@ export function CraftRenderer({
         const data = (await res.json()) as { block?: CraftBlock; error?: string };
         if (data.block && onEdited) onEdited(data.block);
         setToast(data.error ? `Engine: ${data.error}` : "Updated by the engine ✓");
+        ok = !data.error;
       }
     } catch {
-      setToast("Action failed.");
+      setToast(opts?.auto ? "Save failed." : "Action failed.");
     } finally {
       setBusy(false);
       setTimeout(() => setToast(null), 3500);
     }
+    return ok;
   }
 
   return (
@@ -192,7 +261,12 @@ export function CraftRenderer({
         </span>
         <span className="text-[10px] font-mono text-[var(--secondary)] inline-flex items-center gap-1">
           {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-          {state.connected && p.subscribe.length > 0 ? "live" : ""}
+          {[
+            state.connected && p.subscribe.length > 0 ? "live" : "",
+            p.actions.some((a) => a.hasSideEffect) ? "auto-saves" : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
       </div>
 
@@ -202,58 +276,6 @@ export function CraftRenderer({
       {toast && (
         <div className="px-3 py-1.5 text-[11px] border-t border-[var(--border)] text-[var(--secondary)]">{toast}</div>
       )}
-
-      {pending && (
-        <ApprovalModal
-          action={pending}
-          onApprove={() => run(pending)}
-          onCancel={() => setPending(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function ApprovalModal({
-  action,
-  onApprove,
-  onCancel,
-}: {
-  action: CraftAction;
-  onApprove: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onCancel}>
-      <div
-        className="max-w-sm w-full rounded-xl border-2 border-amber-500/50 bg-[var(--surface)] p-5 space-y-3 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-amber-600" strokeWidth={1.5} />
-          <h3 className="font-medium">Approve write action</h3>
-          <button onClick={onCancel} className="ml-auto text-[var(--secondary)] hover:text-[var(--foreground)]">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="text-[13px] text-[var(--secondary)] leading-relaxed">
-          {action.confirm ?? `This runs a real write through ${action.op}. It mutates your connected account.`}
-        </p>
-        <div className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 font-mono text-[11px] break-all">
-          {action.op}({JSON.stringify(action.args ?? {})})
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onApprove}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
-          >
-            Run it <ArrowRight className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={onCancel} className="px-3 py-2 rounded-lg border border-[var(--border)] text-sm text-[var(--secondary)]">
-            Cancel
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -365,6 +387,26 @@ function getPath(obj: unknown, path: string): unknown {
   return cur;
 }
 
+/**
+ * Resolve a [data-craft-field] path on a row, with a robust title fallback.
+ * Notion title property names vary (title / Name / …), so an authored path
+ * often misses. For a "@title"/title/name path that comes back empty, dig the
+ * real title out of the row via notionTitle/rowLabel instead of showing "—".
+ */
+function resolveField(row: unknown, rawPath: string): unknown {
+  const path = rawPath.replace(/^@/, "");
+  const v = getPath(row, path);
+  // title/name appearing as a path segment (title, @title, properties.title.title.0.plain_text…)
+  const wantsTitle = rawPath.startsWith("@") || /(^|[._[])(title|name)([._\]]|$)/i.test(rawPath);
+  if ((v == null || v === "") && wantsTitle && row && typeof row === "object") {
+    const t = notionTitle(row as Record<string, unknown>);
+    if (t != null && t !== "") return t;
+    const label = rowLabel(row);
+    if (label && label !== "Untitled") return label;
+  }
+  return v;
+}
+
 /** Humanize a real field value for display (dates -> readable; null -> em dash). */
 function formatFieldValue(path: string, v: unknown): string {
   if (v == null || v === "") return "—";
@@ -383,8 +425,15 @@ function formatFieldValue(path: string, v: unknown): string {
  * clone with its row's REAL runtime id (and type, for the Notion {type} splice).
  */
 function renderEachInto(target: HTMLElement, tmpl: HTMLTemplateElement, rows: unknown[]): void {
-  // Clear prior clones, keep the <template> (templates never render on the live tree).
-  target.querySelectorAll("[data-craft-row]").forEach((n) => n.remove());
+  // Clear EVERYTHING except the <template> — prior row clones AND the static
+  // "Loading…" placeholder text, so it doesn't linger above the live rows once
+  // data arrives. (The template itself never renders on the live tree.)
+  Array.from(target.childNodes).forEach((n) => {
+    if (n !== tmpl) n.remove();
+  });
+  if (rows.length === 0) {
+    target.appendChild(document.createTextNode("No items."));
+  }
   const rowIdField = tmpl.dataset.craftRowId || "id";
   const typeFrom = tmpl.dataset.craftTypeFrom;
   for (const row of rows.slice(0, 50)) {
@@ -398,7 +447,7 @@ function renderEachInto(target: HTMLElement, tmpl: HTMLTemplateElement, rows: un
     // textContent (never innerHTML — real SaaS text can't inject markup).
     el.querySelectorAll<HTMLElement>("[data-craft-field]").forEach((node) => {
       const path = node.getAttribute("data-craft-field") || "";
-      const v = getPath(row, path);
+      const v = resolveField(row, path);
       node.textContent = formatFieldValue(path, v);
     });
     // Editable fields: pre-fill [data-craft-input] via the .value PROPERTY.
@@ -409,6 +458,8 @@ function renderEachInto(target: HTMLElement, tmpl: HTMLTemplateElement, rows: un
         ? getPath(row, from)
         : (row && typeof row === "object" ? notionBlockText(row as Record<string, unknown>) : null) ?? "";
       input.value = String(val ?? "");
+      // Seed the auto-save dirty baseline so polling re-fills don't trigger a write.
+      input.dataset.craftCommitted = input.value;
     });
     target.appendChild(frag);
   }

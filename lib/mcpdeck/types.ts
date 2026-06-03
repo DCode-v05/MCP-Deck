@@ -2,6 +2,7 @@
  * McpDeck protocol types. The session is the unit of bidirectional state:
  * one long-lived SSE stream out, one POST endpoint in, both keyed by sessionId.
  */
+import type { CraftBlock } from "@/lib/crafts/craft-block";
 
 export type ServerHealth = "ok" | "degraded" | "down" | "disabled";
 
@@ -144,6 +145,7 @@ export type McpDeckEvent =
   | { type: "engine_iteration"; iteration: number; goal: string }
   | { type: "engine_thought"; thought: EngineThought }
   | { type: "engine_done"; reason: "completed" | "stopped" | "error"; summary: string | null }
+  | { type: "craft"; block: CraftBlock }
   | { type: "usage"; inputTokens: number; outputTokens: number; totalCost: number }
   | { type: "usage_state"; usage: UsageStats }
   | { type: "error"; message: string };

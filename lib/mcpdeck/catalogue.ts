@@ -2,14 +2,6 @@ import type { McpServerInfo, McpToolInfo, McpResourceNode } from "./types";
 
 export const SERVERS: McpServerInfo[] = [
   {
-    id: "fs",
-    name: "Filesystem",
-    description: "Local workspace files. Read/write/list under /workspace.",
-    toolIds: ["fs.list", "fs.read", "fs.write", "fs.search"],
-    resourceRoot: "fs:/",
-    latencyMs: 18,
-  },
-  {
     id: "git",
     name: "Git",
     description: "Repository inspection: status, log, diff, branch.",
@@ -28,57 +20,6 @@ export const SERVERS: McpServerInfo[] = [
 ];
 
 export const TOOLS: McpToolInfo[] = [
-  {
-    id: "fs.list",
-    serverId: "fs",
-    name: "fs.list",
-    description: "List entries under a directory.",
-    inputSchema: {
-      type: "object",
-      properties: { path: { type: "string", description: "Absolute path under /workspace." } },
-      required: ["path"],
-    },
-    hasSideEffect: false,
-  },
-  {
-    id: "fs.read",
-    serverId: "fs",
-    name: "fs.read",
-    description: "Read a text file.",
-    inputSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    },
-    hasSideEffect: false,
-  },
-  {
-    id: "fs.write",
-    serverId: "fs",
-    name: "fs.write",
-    description: "Write a text file. Overwrites if it exists.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: { type: "string" },
-        contents: { type: "string", description: "New file body." },
-      },
-      required: ["path", "contents"],
-    },
-    hasSideEffect: true,
-  },
-  {
-    id: "fs.search",
-    serverId: "fs",
-    name: "fs.search",
-    description: "ripgrep-style search across the workspace.",
-    inputSchema: {
-      type: "object",
-      properties: { query: { type: "string" } },
-      required: ["query"],
-    },
-    hasSideEffect: false,
-  },
   {
     id: "git.status",
     serverId: "git",
@@ -184,24 +125,12 @@ export const TOOLS: McpToolInfo[] = [
 ];
 
 export const INITIAL_RESOURCES: McpResourceNode[] = [
-  { id: "fs:/", serverId: "fs", parentId: null, name: "/workspace", kind: "folder", preview: null, expandable: true },
   { id: "git:/", serverId: "git", parentId: null, name: "Repository", kind: "folder", preview: null, expandable: true },
   { id: "linear:/", serverId: "linear", parentId: null, name: "Linear", kind: "folder", preview: null, expandable: true },
 ];
 
 export function expandResource(nodeId: string): McpResourceNode[] {
   switch (nodeId) {
-    case "fs:/":
-      return [
-        { id: "fs:/src", serverId: "fs", parentId: "fs:/", name: "src/", kind: "folder", preview: null, expandable: true },
-        { id: "fs:/package.json", serverId: "fs", parentId: "fs:/", name: "package.json", kind: "file", preview: "1.2 KB · JSON", expandable: false },
-        { id: "fs:/README.md", serverId: "fs", parentId: "fs:/", name: "README.md", kind: "file", preview: "4.8 KB · Markdown", expandable: false },
-      ];
-    case "fs:/src":
-      return [
-        { id: "fs:/src/index.ts", serverId: "fs", parentId: "fs:/src", name: "index.ts", kind: "file", preview: "1.1 KB", expandable: false },
-        { id: "fs:/src/app.ts", serverId: "fs", parentId: "fs:/src", name: "app.ts", kind: "file", preview: "3.2 KB", expandable: false },
-      ];
     case "git:/":
       return [
         { id: "git:/main", serverId: "git", parentId: "git:/", name: "main", kind: "folder", preview: "current branch", expandable: true },

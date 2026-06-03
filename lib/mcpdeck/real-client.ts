@@ -21,8 +21,8 @@ interface Connected {
 /**
  * Build a provider backed by real MCP servers. Config is a JSON array in
  * MCPDECK_SERVERS, e.g.:
- *   [{"id":"fs","name":"Filesystem","command":"npx",
- *     "args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}]
+ *   [{"id":"github","name":"GitHub","command":"npx",
+ *     "args":["-y","@modelcontextprotocol/server-github"]}]
  * Each server is spawned over stdio, its tools discovered, and tool calls
  * routed back through the client.
  */
@@ -41,6 +41,12 @@ export async function buildRealProvider(rawConfig: string): Promise<McpProvider 
   // SaaS servers, and prevents tokenless servers (GitHub/Notion start anyway)
   // from appearing "connected" when they can't actually authenticate.
   const runnable = configs.filter((cfg) => {
+    // The filesystem server is intentionally disabled — drop it even if it's
+    // still listed in MCPDECK_SERVERS, so it never connects or appears.
+    if (isFilesystemServer(cfg)) {
+      console.info(`[mcpdeck] filesystem server "${cfg.id}" is disabled — skipping (remove it from MCPDECK_SERVERS).`);
+      return false;
+    }
     const missing = missingCredentials(cfg.id);
     if (missing.length > 0) {
       console.info(`[mcpdeck] skipping "${cfg.id}" — set ${missing.join(" + ")} in .env to enable it.`);
@@ -151,6 +157,13 @@ const REQUIRED_CREDENTIALS: Record<string, string[][]> = {
   linear: [["LINEAR_API_TOKEN"]],
   slack: [["SLACK_BOT_TOKEN"], ["SLACK_TEAM_ID"]],
 };
+
+/** The filesystem server is intentionally unsupported — match it by id or package. */
+function isFilesystemServer(cfg: ServerConfig): boolean {
+  if (/^(fs|filesystem|file-system)$/i.test(cfg.id)) return true;
+  const blob = `${cfg.command} ${(cfg.args ?? []).join(" ")}`.toLowerCase();
+  return blob.includes("server-filesystem");
+}
 
 /** Returns the credential groups that are NOT satisfied for a server id (empty = good to run). */
 function missingCredentials(serverId: string): string[] {

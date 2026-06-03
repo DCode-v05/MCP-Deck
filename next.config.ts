@@ -3,11 +3,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   async redirects() {
-    // McpDeck's page moved under /apps. Keep the old top-level URLs working.
-    // (The API namespace /api/mcpdeck/* is unaffected — these are page paths only.)
+    // McpDeck is now the root surface. Keep old URLs working.
     return [
-      { source: "/mcpdeck", destination: "/apps/mcpdeck", permanent: true },
-      { source: "/mcpdeck/generate", destination: "/apps/mcpdeck/generate", permanent: true },
+      { source: "/apps", destination: "/", permanent: true },
+      { source: "/apps/mcpdeck", destination: "/", permanent: true },
+      { source: "/apps/mcpdeck/generate", destination: "/generate", permanent: true },
+      { source: "/mcpdeck", destination: "/", permanent: true },
+      { source: "/mcpdeck/generate", destination: "/generate", permanent: true },
     ];
   },
 };

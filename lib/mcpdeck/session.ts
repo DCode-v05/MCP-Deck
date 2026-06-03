@@ -37,6 +37,12 @@ export function getSession(id: string): McpDeckSession | undefined {
   return SESSIONS.get(id);
 }
 
+/** All sessions in this process — one per agent run. Backs the run history
+ * (persists until the dev server restarts; no DB). */
+export function listSessions(): McpDeckSession[] {
+  return [...SESSIONS.values()];
+}
+
 export function dropSession(id: string): void {
   const s = SESSIONS.get(id);
   if (s) s.dispose();
@@ -50,6 +56,10 @@ export class McpDeckSession {
   readonly provider: McpProvider;
   goal: string | null = null;
   status: SessionSnapshot["status"] = "idle";
+  /** When this run was created (for the history list, sorted most-recent-first). */
+  readonly startedAt = Date.now();
+  /** The engine's closing summary, set on engine_done (shown in history). */
+  finalSummary: string | null = null;
 
   private servers: Map<string, McpServerState> = new Map();
   private tools: Map<string, McpToolState> = new Map();
@@ -178,6 +188,8 @@ export class McpDeckSession {
 
   emit(ev: McpDeckEvent): void {
     if (this.disposed) return;
+    // Capture the closing summary for the history list, wherever it's emitted.
+    if (ev.type === "engine_done") this.finalSummary = ev.summary;
     this.buffer.push(ev);
     // Trim buffer to keep memory bounded.
     if (this.buffer.length > 500) this.buffer.splice(0, this.buffer.length - 500);

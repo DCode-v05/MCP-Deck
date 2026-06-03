@@ -1,6 +1,10 @@
-import { redirect } from "next/navigation";
+import { McpDeckPanel } from "@/components/mcpdeck/McpDeckPanel";
 
-// The widget chat was removed — /apps is now the only surface.
+// McpDeck is the only surface — it lives at the root.
 export default function Page() {
-  redirect("/apps");
+  return (
+    <main className="h-full">
+      <McpDeckPanel />
+    </main>
+  );
 }

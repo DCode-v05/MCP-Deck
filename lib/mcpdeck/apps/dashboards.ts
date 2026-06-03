@@ -77,15 +77,6 @@ export const DASHBOARDS: DashboardDef[] = [
       { channel: "slack.slack_list_channels", args: { limit: 200 }, as: "channels", poll_s: 60 },
     ],
   },
-  {
-    serverId: "fs",
-    label: "Filesystem",
-    icon: "table",
-    accent: "#2E86C0",
-    bindings: [
-      { channel: "fs.list_directory", args: { path: "." }, as: "entries", poll_s: 20 },
-    ],
-  },
 ];
 
 export function getDashboard(serverId: string): DashboardDef | undefined {
