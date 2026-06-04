@@ -57,7 +57,7 @@ export function CraftStudio() {
             </div>
           </div>
           <span className="text-[10px] font-mono text-[var(--secondary)]">
-            MCP: {providerKind === "real" ? "real servers" : "mock (fs/git/linear)"}
+            MCP: {providerKind === "real" ? "real servers" : "mock (git/linear)"}
           </span>
         </div>
       </header>

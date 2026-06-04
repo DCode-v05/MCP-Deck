@@ -21,8 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mini-BAP — Interactive UI Responses",
-  description: "Prototype demonstrating typed widget responses streamed from an LLM.",
+  title: "MCP Deck — Interactive UI Responses",
+  description: "Prototype that turns one prompt into a persistent, cross-app agent that authors live, interactive UI over your real MCP tools.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
