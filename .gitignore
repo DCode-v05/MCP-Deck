@@ -23,3 +23,7 @@ mcp-workspace/
 # scratch test files
 _*.mts
 _*.mjs
+.vscode/
+.idea/
+Thumbs.db
+!.env.local.example
