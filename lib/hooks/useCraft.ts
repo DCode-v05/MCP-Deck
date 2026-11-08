@@ -74,7 +74,6 @@ export function useCraft() {
         setSpec(data.spec);
         setRaw(data.raw);
         setProviderKind(data.providerKind);
-        // Auto-run all read-only data sources to populate the live app.
         for (const src of data.spec.dataSources) {
           void runSource(src.id, src, data.craftId);
         }
@@ -107,7 +106,6 @@ export function useCraft() {
         });
         const data = (await res.json()) as { result: string; isError: boolean };
         setOutcome({ actionId: action.id, ok: !data.isError, message: data.result });
-        // Re-pull data sources so the dashboard reflects the side effect.
         if (spec) for (const src of spec.dataSources) void runSource(src.id, src, craftId);
       } catch (e) {
         setOutcome({ actionId: action.id, ok: false, message: e instanceof Error ? e.message : String(e) });

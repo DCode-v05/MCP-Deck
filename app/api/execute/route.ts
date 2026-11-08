@@ -8,18 +8,11 @@ import { isProviderId, type ProviderId } from "@/lib/engine/providers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/execute — the §6 route:engine entry. A craft-emit stamped
- * route:engine (or a free-text follow-up / edit) RESUMES the thread: the engine
- * re-authors the SAME craft key with the new intent + prior thread context, and
- * returns version+1. This is the "to and fro" through the reasoning loop —
- * unlike route:direct, which is a mechanical channel call with no engine.
- */
 interface BlockInput {
   thread_id: string;
-  block_id: string; // the craft's wire id
-  action?: string; // emitted action name
-  text: string; // free-text intent ("add fuel level", "draft a reply", …)
+  block_id: string;
+  action?: string;
+  text: string;
   providerId?: ProviderId;
 }
 
@@ -40,7 +33,6 @@ export async function POST(req: NextRequest) {
 
   try {
     const provider = await getMcpProvider();
-    // Resume: re-author with the thread's message history as context + the new intent.
     const intent = prior
       ? `Update the "${prior.payload.title}" craft (key "${prior.payload.key}"): ${text}. Re-author the full <craft> reflecting this.`
       : text;
@@ -55,7 +47,6 @@ export async function POST(req: NextRequest) {
 
     if (!block) return Response.json({ error: "engine did not produce a craft" }, { status: 422 });
 
-    // §9–10: an edit keeps the same id/key and bumps version.
     const finalBlock = prior
       ? bumpCraftVersion({ ...prior }, block.payload, ts)
       : block;

@@ -9,11 +9,6 @@ import type { AgentMessage, ToolDefinition } from "../tools/types";
 
 const MAX_TOKENS = 4096;
 
-/**
- * Anthropic agent turn (one LLM call). Streams text + tool calls.
- * Uses the beta prompt-caching endpoint with cache_control: ephemeral on
- * the system prompt so it caches across loop iterations.
- */
 export function createAnthropicAgent(model: string): AgentTurnInvoker {
   return (systemPrompt, messages, tools) => {
     let resolveDone!: (v: { usage: UsageMetadata; stopReason: StopReason }) => void;
@@ -151,7 +146,6 @@ function toAnthropicMessage(m: AgentMessage): AnthropicMsg {
       content: blocks.length > 0 ? blocks : [{ type: "text", text: "" }],
     };
   }
-  // tool_result blocks ride inside a user message per Anthropic's API
   return {
     role: "user",
     content: m.results.map((r) => ({

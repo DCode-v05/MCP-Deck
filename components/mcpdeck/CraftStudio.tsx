@@ -64,7 +64,6 @@ export function CraftStudio() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-6 space-y-5">
-          {/* Prompt */}
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
             <div className="text-[10px] uppercase tracking-[0.25em] font-mono text-[var(--secondary)]">
               Describe the app you want — the engine builds it against live MCP tools
@@ -77,7 +76,6 @@ export function CraftStudio() {
                 disabled={generating}
                 placeholder="e.g. A live board of my Linear todos with a button to comment on an issue."
                 onKeyDown={(e) => {
-                  // Enter sends; Shift+Enter inserts a newline.
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     submit(prompt);
@@ -183,7 +181,6 @@ function GeneratedCraft({
 
   return (
     <div className="space-y-4">
-      {/* App header */}
       <div className="rounded-xl border p-4" style={{ background: `${accent}0D`, borderColor: `${accent}33` }}>
         <div className="flex items-center justify-between">
           <div>
@@ -207,7 +204,6 @@ function GeneratedCraft({
         )}
       </div>
 
-      {/* Blocks (engine → UI, bound to MCP data) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {spec.blocks.map((b, i) => (
           <BlockView
@@ -221,7 +217,6 @@ function GeneratedCraft({
         ))}
       </div>
 
-      {/* Actions (engine → real world, approval-gated) */}
       {spec.actions.length > 0 && (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
           <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] font-mono text-amber-700 dark:text-amber-400">

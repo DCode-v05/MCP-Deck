@@ -9,8 +9,6 @@ interface Body {
   args?: Record<string, unknown>;
 }
 
-// Runs one tool call from a generated craft — data sources (read-only) and
-// approved actions (side effects) both flow through here.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as Body;
   const session = getCraftSession(body.craftId);

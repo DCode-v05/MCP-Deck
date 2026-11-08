@@ -1,7 +1,3 @@
-/**
- * McpDeck protocol types. The session is the unit of bidirectional state:
- * one long-lived SSE stream out, one POST endpoint in, both keyed by sessionId.
- */
 import type { CraftBlock } from "@/lib/crafts/craft-block";
 
 export type ServerHealth = "ok" | "degraded" | "down" | "disabled";
@@ -12,7 +8,6 @@ export interface McpServerInfo {
   description: string;
   toolIds: string[];
   resourceRoot: string;
-  /** simulated round-trip latency in ms */
   latencyMs: number;
 }
 
@@ -29,13 +24,11 @@ export interface McpToolInfo {
   serverId: string;
   name: string;
   description: string;
-  /** input schema (JSON Schema fragment) */
   inputSchema: {
     type: "object";
     properties: Record<string, { type: string; description?: string; enum?: string[] }>;
     required?: string[];
   };
-  /** if true, this tool has a real side effect (write, send, charge) */
   hasSideEffect: boolean;
 }
 
@@ -54,7 +47,6 @@ export interface McpResourceNode {
   parentId: string | null;
   name: string;
   kind: "folder" | "file" | "issue" | "commit" | "record";
-  /** when null and !expanded, the engine will lazy-load on expand */
   preview: string | null;
   expandable: boolean;
 }
@@ -78,33 +70,25 @@ export type ApprovalVerdict =
   | { kind: "approve_remember"; args: Record<string, unknown> }
   | { kind: "deny"; reason?: string };
 
-/** Per-server usage, the way a subscription/billing dashboard would show it. */
 export interface ServerUsage {
   serverId: string;
   requests: number;
   errors: number;
-  /** approximate bytes of result payloads returned by this server */
   bytes: number;
   lastActivityAt: number | null;
 }
 
-/** Whole-session usage rolled up for the Subscription tab. */
 export interface UsageStats {
-  /** subscription framing */
   plan: string;
   requestQuota: number;
-  /** engine reasoning cost */
   inputTokens: number;
   outputTokens: number;
   totalCost: number;
   iterations: number;
-  /** tool activity */
   toolInvocations: number;
   approvals: number;
   denials: number;
-  /** per-server breakdown */
   byServer: ServerUsage[];
-  /** session timing */
   startedAt: number;
   updatedAt: number;
 }
@@ -119,15 +103,10 @@ export interface PendingApproval {
 
 export interface EngineThought {
   iteration: number;
-  /** Servers currently enabled at the moment of the read. */
   enabledServers: string[];
-  /** Tools pinned at the moment of the read. */
   pinnedTools: string[];
-  /** Resource nodes the user has expanded. */
   openResources: string[];
-  /** Most recent tool calls the engine is conditioning on. */
   recentCalls: Array<{ toolId: string; isError: boolean; resultPreview: string | null }>;
-  /** Plain-language sentence describing what the engine is about to do. */
   intent: string;
 }
 

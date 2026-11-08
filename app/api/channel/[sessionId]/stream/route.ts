@@ -5,9 +5,6 @@ import { encodeFrame, type ChannelFrame } from "@/lib/channels/wire";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/channel/{sessionId}/stream — the craft's single SSE. All of the
-// craft's channels multiplex (fan-in) onto this one stream. Data frames flow
-// down; the engine is never involved per tick.
 export async function GET(req: NextRequest, ctx: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = await ctx.params;
   const session = getSubscription(sessionId);
@@ -49,7 +46,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ sessionId: 
         try {
           controller.close();
         } catch {
-          /* already closed */
         }
       };
       req.signal.addEventListener("abort", cleanup);

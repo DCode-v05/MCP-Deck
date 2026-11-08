@@ -16,10 +16,6 @@ import type {
 } from "@/lib/mcpdeck/types";
 import type { CraftBlock } from "@/lib/crafts/craft-block";
 
-/**
- * A single entry in the "Model Processing" trace: the model's reasoning, a tool
- * it used (with args + result), a live panel it rendered, or the final outcome.
- */
 export type TraceItem =
   | { id: string; ts: number; kind: "reasoning"; text: string }
   | {
@@ -37,7 +33,6 @@ export type TraceItem =
   | { id: string; ts: number; kind: "craft"; blockId: string; title: string }
   | { id: string; ts: number; kind: "done"; text: string; level: "info" | "error" };
 
-/** One past agent run, for the conversation-history list. */
 export interface RunSummary {
   sessionId: string;
   goal: string;
@@ -60,7 +55,6 @@ export interface McpDeckState {
   pending: PendingApproval[];
   traces: TraceItem[];
   crafts: CraftBlock[];
-  /** Past runs in this process (persists across reloads until dev restarts). */
   history: RunSummary[];
   usage: { inputTokens: number; outputTokens: number; totalCost: number } | null;
   usageStats: UsageStats | null;
@@ -99,7 +93,6 @@ type Action =
 function reducer(state: McpDeckState, action: Action): McpDeckState {
   switch (action.kind) {
     case "reset":
-      // Keep the catalogue and the history list across a reset.
       return { ...INITIAL_STATE, catalogue: state.catalogue, history: state.history };
     case "set_history":
       return { ...state, history: action.runs };
@@ -187,8 +180,6 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
     case "engine_iteration":
       return { ...state, iteration: ev.iteration, goal: ev.goal };
     case "engine_thought":
-      // The model's own narration (engine_text) is the visible reasoning; the
-      // system-generated intent is not surfaced as a separate trace.
       return state;
     case "craft":
       return {
@@ -227,7 +218,6 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
         },
       };
     case "log":
-      // Logs (retries, info) are kept out of the trace to keep it readable.
       return state;
     case "error":
       return {
@@ -239,8 +229,6 @@ function applyEvent(state: McpDeckState, ev: McpDeckEvent): McpDeckState {
   }
 }
 
-// Distribute the Omit across the union so each variant keeps its own fields
-// (a plain Omit<Union, K> collapses to the shared `kind` property only).
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 function pushTrace(prev: TraceItem[], partial: DistributiveOmit<TraceItem, "id" | "ts">): TraceItem[] {
@@ -253,7 +241,6 @@ function pushTrace(prev: TraceItem[], partial: DistributiveOmit<TraceItem, "id" 
   return arr.length > 400 ? arr.slice(arr.length - 400) : arr;
 }
 
-/** Stream reasoning text into the last reasoning item, or start a new one. */
 function appendReasoning(prev: TraceItem[], text: string): TraceItem[] {
   const last = prev[prev.length - 1];
   if (last && last.kind === "reasoning") {
@@ -287,7 +274,6 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<Mcp
       try {
         yield JSON.parse(dataLine) as McpDeckEvent;
       } catch {
-        /* ignore */
       }
     }
   }
@@ -298,7 +284,6 @@ export function useMcpDeck() {
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
 
-  // Catalogue is static — fetch once.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -318,7 +303,6 @@ export function useMcpDeck() {
           });
         }
       } catch {
-        /* ignore */
       }
     })();
     return () => {
@@ -332,7 +316,6 @@ export function useMcpDeck() {
       const data = (await res.json()) as { runs: RunSummary[] };
       dispatch({ kind: "set_history", runs: data.runs });
     } catch {
-      /* ignore */
     }
   }, []);
 
@@ -365,13 +348,13 @@ export function useMcpDeck() {
       }
       const sessionId = res.headers.get("X-Session-Id");
       if (sessionId) sessionIdRef.current = sessionId;
-      void fetchHistory(); // the new run shows in history immediately
+      void fetchHistory();
 
       for await (const ev of parseSse(res.body)) {
         if (ev.type === "session_ready") sessionIdRef.current = ev.sessionId;
         dispatch({ kind: "event", ev });
       }
-      void fetchHistory(); // refresh status/summary when it finishes
+      void fetchHistory();
     } catch (err) {
       if (ctrl.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
@@ -380,8 +363,6 @@ export function useMcpDeck() {
     }
   }, [fetchHistory]);
 
-  // Re-open a past run's session and replay its buffered events to rebuild the
-  // trace (read-only view; the engine is NOT re-run).
   const loadRun = useCallback(async (sessionId: string) => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
@@ -399,12 +380,9 @@ export function useMcpDeck() {
         dispatch({ kind: "event", ev });
       }
     } catch {
-      /* aborted or the session is gone */
     }
   }, []);
 
-  // On mount: load the run history and restore the most recent conversation so a
-  // reload doesn't lose it (persists until the dev server restarts).
   useEffect(() => {
     (async () => {
       try {
@@ -413,7 +391,6 @@ export function useMcpDeck() {
         dispatch({ kind: "set_history", runs: data.runs });
         if (data.runs.length > 0) void loadRun(data.runs[0].sessionId);
       } catch {
-        /* ignore */
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

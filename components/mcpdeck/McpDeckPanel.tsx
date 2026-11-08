@@ -48,7 +48,6 @@ export function McpDeckPanel() {
     state.status === "awaiting_input" ||
     state.status === "starting";
 
-  // Every prompt runs the multi-step agent across the connected apps.
   const submit = (text: string) => {
     if (!text.trim() || isRunning) return;
     void start(text.trim());
@@ -57,7 +56,6 @@ export function McpDeckPanel() {
 
   return (
     <div className="flex flex-col h-full bg-[var(--background)]">
-      {/* Header */}
       <header className="border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-md px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Sparkles className="h-5 w-5 text-accent" strokeWidth={1.5} />
@@ -81,7 +79,6 @@ export function McpDeckPanel() {
             </button>
           )}
 
-          {/* Mode switch: Agent cockpit vs Apps dashboards */}
           <div className="ml-2 flex items-center gap-0.5 rounded-lg border border-[var(--border)] p-0.5">
             <ModeButton active={mode === "agent"} onClick={() => setMode("agent")} icon={Bot}>
               Agent
@@ -92,7 +89,6 @@ export function McpDeckPanel() {
           </div>
         </div>
 
-        {/* Right-side tabs (Agent mode only) */}
         <div className="flex items-center gap-1">
           {mode === "agent" && (
             <>
@@ -122,21 +118,17 @@ export function McpDeckPanel() {
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
 
-      {/* Apps mode: live read-only dashboards bound to real tools via channels */}
       {mode === "apps" && (
         <div className="flex-1 min-h-0">
           <AppsMode servers={state.catalogue.servers} providerKind={state.providerKind} />
         </div>
       )}
 
-      {/* Agent mode: the goal/approval cockpit. Rails collapse so the activity +
-          approval center can breathe — fixes the congestion. */}
       {mode === "agent" && (
       <div
         className="flex-1 grid min-h-0"
         style={{ gridTemplateColumns: railsOpen ? "260px 1fr" : "1fr" }}
       >
-        {/* Left rail */}
         {railsOpen && (
         <aside className="border-r border-[var(--border)] overflow-y-auto p-2.5 space-y-3">
           <HistoryList runs={state.history} activeId={state.sessionId} onSelect={loadRun} />
@@ -154,7 +146,6 @@ export function McpDeckPanel() {
         </aside>
         )}
 
-        {/* Center: the Model Processing trace (or Usage) + the goal input */}
         <main className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto">
             {tab === "usage" ? (
@@ -177,7 +168,6 @@ export function McpDeckPanel() {
                 placeholder="Give the agent a goal across your apps… e.g. resolve the issues assigned to me"
                 rows={2}
                 onKeyDown={(e) => {
-                  // Enter sends; Shift+Enter inserts a newline.
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     submit(goal);
@@ -416,7 +406,7 @@ function StatusPill({ status }: { status: ReturnType<typeof useMcpDeck>["state"]
 }
 
 function ProviderBadge({ kind }: { kind: "mock" | "real" | null }) {
-  if (!kind) return null; // catalogue not loaded yet
+  if (!kind) return null;
   const real = kind === "real";
   return (
     <span

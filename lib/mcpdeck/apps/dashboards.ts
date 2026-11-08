@@ -1,31 +1,12 @@
-/**
- * Apps-mode dashboard bindings. Each connected MCP server gets a read-only
- * dashboard whose live data flows through the EXISTING channel subsystem
- * (lib/channels/* + useChannel) — the channel polls getMcpProvider().callTool
- * for any non-"mock.*" op, so a real tool id like "github.search_repositories"
- * flows through the shared poll loop unchanged. No engine reasoning per tick.
- *
- * All tool ids here are REAL (probed live 2026-06-01). Read-only only — no
- * write tools are ever bound here.
- */
 import type { ChannelBinding } from "@/lib/channels/wire";
 
 export interface DashboardDef {
-  /** matches McpServerInfo.id from the catalogue */
   serverId: string;
   label: string;
-  /** lucide icon key (see DashboardIcon) */
   icon: string;
   accent: string;
-  /** the channels this dashboard subscribes to (fan-in onto one SSE) */
   bindings: ChannelBinding[];
-  /**
-   * The "identity probe" alias — a channel that returns a real identity even
-   * when the main list is empty. Used to tell "connected, finish setup" apart
-   * from "not connected". (e.g. notion API-get-self, slack get_users.)
-   */
   probeAs?: string;
-  /** env var hint shown when the server is NOT connected */
   credHint?: string;
 }
 

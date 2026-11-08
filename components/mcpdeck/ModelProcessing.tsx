@@ -16,12 +16,6 @@ interface Props {
   onResolve: (requestId: string, verdict: ApprovalVerdict) => void;
 }
 
-/**
- * "Model Processing" — a live trace of what the model is thinking and which
- * tools it is using across the connected apps. Reasoning renders as thinking
- * blocks; each tool call renders as a card (args + result, auto vs approved);
- * a rendered live panel appears inline; writes await approval at the tail.
- */
 export function ModelProcessing({ traces, pending, crafts, toolsById, onResolve }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 

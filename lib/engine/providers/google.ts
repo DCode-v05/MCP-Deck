@@ -11,10 +11,6 @@ import type {
   ToolDefinition,
 } from "../tools/types";
 
-/**
- * Google Gemini agent turn. Gemini doesn't issue stable tool-call ids,
- * so we synthesize them so run-engine can correlate calls and results.
- */
 let synthIdCounter = 0;
 function synthId(name: string): string {
   synthIdCounter++;

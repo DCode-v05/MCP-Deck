@@ -40,7 +40,6 @@ export async function POST(req: NextRequest) {
       session.requestStop();
       return Response.json({ ok: true });
     case "replay":
-      // Fire-and-forget: events stream to subscribers via the session.
       void replayToolCall(session, m.replayId, m.editedArgs).catch((err) => {
         session.logEvent("error", `replay failed: ${err instanceof Error ? err.message : String(err)}`);
       });

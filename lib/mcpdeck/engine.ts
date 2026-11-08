@@ -3,21 +3,9 @@ import type { AgentMessage, ToolCall, ToolDefinition } from "@/lib/engine/tools"
 import { makeId, type McpDeckSession } from "./session";
 import { authorCraft } from "@/lib/crafts/authoring";
 
-// Terse goals require the agent to discover + traverse across apps before acting,
-// so it gets a wider step budget (set via the autonomous-operator-prompt workflow).
 const MAX_ITERATIONS = 20;
-// Per-tool wall-clock cap so one slow/hung MCP call can't stall the whole loop.
 const TOOL_TIMEOUT_MS = 45_000;
 
-/**
- * The agent's operating procedure — the "intelligence" that lets a TERSE goal
- * (e.g. "complete Project X", "solve the issue assigned to me") trigger full
- * autonomous cross-app reasoning: decompose → survey/discover → follow
- * cross-references → infer the deliverable → act (writes gated) → verify →
- * finish. Designed + adversarially judged via the autonomous-operator-prompt
- * workflow. Embedded ABOVE the dynamic state sections (enabled servers / recent
- * results) that it references.
- */
 const OPERATING_PROCEDURE = `## How you work
 
 You hold tools from MULTIPLE apps at once and act as ONE integrated system: the output of one app feeds the next. Treat all connected apps as a single shared knowledge graph — every entity (page, brief, project, issue, repo, file, PR, channel, message, person) is a NODE, and any mention of another app's entity inside one (a repo, project, assignee, file path, ticket number, link, @mention) is a POINTER you follow into the owning app, not a dead string. The user's goal may be TERSE and high-level; figuring out the whole cross-app workflow is YOUR job, not theirs to enumerate.
@@ -92,7 +80,6 @@ function buildSystemPrompt(session: McpDeckSession, opts: McpDeckRunOpts, ctx: R
   return lines.join("\n");
 }
 
-/** Plain-language one-liner describing what the engine is about to do this iteration. */
 function describeIntent(iteration: number, ctx: ReadContext, totalIterations: number): string {
   if (iteration === 1) {
     const enabled = ctx.enabledServers.join(", ") || "no servers";
@@ -176,11 +163,6 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-/**
- * Robust tool execution: a per-call timeout, plus ONE retry for READ tools on a
- * transient failure (writes are NEVER retried — a re-sent write could duplicate
- * a real side effect).
- */
 async function callToolRobust(
   session: McpDeckSession,
   tool: { id: string; hasSideEffect: boolean },
@@ -204,12 +186,6 @@ async function callToolRobust(
   return last;
 }
 
-/**
- * render_ui: author a live craft (the same editable, auto-saving panels the
- * craft engine produces) and stream it to the client as a `craft` event. The
- * agent's accumulated messages are passed as prior context so the author can
- * reuse the REAL ids already resolved during the workflow.
- */
 async function authorAndEmitCraft(
   session: McpDeckSession,
   opts: McpDeckRunOpts,
@@ -232,7 +208,6 @@ async function authorAndEmitCraft(
   }
 }
 
-/** One model turn, with a single retry on a transient provider failure. */
 async function streamTurn(
   invoker: ReturnType<typeof getProvider>,
   systemPrompt: string,
@@ -296,8 +271,6 @@ export async function runMcpDeck(session: McpDeckSession, opts: McpDeckRunOpts):
       session.emit({ type: "engine_iteration", iteration, goal: opts.goal });
       session.recordIteration();
 
-      // The "in between" step: read live MCP state, broadcast it as a thought,
-      // then fold it into the prompt.
       const ctx = session.readContext();
       session.emit({
         type: "engine_thought",
@@ -327,7 +300,6 @@ export async function runMcpDeck(session: McpDeckSession, opts: McpDeckRunOpts):
       session.recordEngineUsage(totalInput, totalOutput, estimateCost(opts.providerId, totalInput, totalOutput));
 
       if (toolCalls.length === 0) {
-        // No tool call: the model answered in prose. Treat that as the finish.
         session.status = "completed";
         session.emit({ type: "engine_done", reason: "completed", summary: assistantText.trim() || "Done." });
         session.emit({
@@ -377,8 +349,6 @@ export async function runMcpDeck(session: McpDeckSession, opts: McpDeckRunOpts):
         let finalArgs = (call.input ?? {}) as Record<string, unknown>;
         let argsEdited = false;
 
-        // -- Auto reads / approve writes --
-        // WRITE tools pause for the human gate; READ tools run automatically.
         if (tool.hasSideEffect) {
           const requestId = makeId("apr");
           const verdict = await session.awaitApproval({
@@ -458,8 +428,6 @@ export async function runMcpDeck(session: McpDeckSession, opts: McpDeckRunOpts):
 }
 
 function estimateCost(providerId: ProviderId, inputTokens: number, outputTokens: number): number {
-  // Rough per-MTok pricing for the default model — a coarse estimate that keeps
-  // McpDeck self-contained.
   const rates: Record<string, { input: number; output: number }> = {
     sonnet: { input: 3, output: 15 },
     haiku: { input: 1, output: 5 },
@@ -468,10 +436,6 @@ function estimateCost(providerId: ProviderId, inputTokens: number, outputTokens:
   return (inputTokens / 1_000_000) * r.input + (outputTokens / 1_000_000) * r.output;
 }
 
-/**
- * Replay: re-execute a past tool call (optionally with edited args). No LLM —
- * a deterministic re-run, recorded as a fresh replay entry.
- */
 export async function replayToolCall(
   session: McpDeckSession,
   replayId: string,
@@ -500,10 +464,6 @@ export async function replayToolCall(
   session.recordToolCompletion(entry.id, exec.result, exec.isError);
 }
 
-/**
- * Branch: start a NEW engine run on the same session, seeded with the tool
- * results up to (and including) the chosen call as prior context.
- */
 export async function branchFrom(
   session: McpDeckSession,
   replayId: string,

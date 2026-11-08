@@ -1,5 +1,3 @@
-/** Provider-agnostic tool types. Translated to native shape per provider. */
-
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -8,7 +6,6 @@ export interface ToolDefinition {
     properties: Record<string, JsonSchemaProperty>;
     required?: string[];
   };
-  /** If true, calling this tool terminates the loop. */
   terminal?: boolean;
 }
 

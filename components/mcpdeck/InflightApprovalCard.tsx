@@ -14,7 +14,6 @@ export function InflightApprovalCard({ pending, hasSideEffect, onResolve }: Prop
   const [argsJson, setArgsJson] = useState(() => JSON.stringify(pending.args, null, 2));
   const [parseError, setParseError] = useState<string | null>(null);
 
-  // If the engine re-emits the same pending (snapshot replay), keep the form state.
   useEffect(() => {
     setArgsJson(JSON.stringify(pending.args, null, 2));
     setParseError(null);

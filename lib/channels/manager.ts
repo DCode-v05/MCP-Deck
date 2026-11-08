@@ -1,16 +1,3 @@
-/**
- * ChannelManager + SubscriptionSession (bidirectional-engine-plan §8).
- *
- * ChannelManager: globalThis-hoisted registry keyed by channelKey. Lazily
- * creates a Channel on first subscription, ref-counts subscriptions, and drops
- * a Channel after a grace window once its last subscriber leaves. This is the
- * shared owner — UNLIKE today's per-session poll loops.
- *
- * SubscriptionSession: the per-craft FAN-IN multiplexer. One craft -> one
- * SSE -> many channels multiplexed onto it. Holds the bindings and the live SSE
- * write sink; subscribes to each Channel and tags frames with the craft-local
- * `as` alias before writing them to the single stream.
- */
 import type { ChannelBinding, ChannelFrame } from "./wire";
 import { channelKey, type ChannelRef } from "./ref";
 import { Channel } from "./channel";
@@ -23,7 +10,6 @@ interface Entry {
   graceTimer: ReturnType<typeof setTimeout> | null;
 }
 
-// Hoist both registries into globalThis so Next.js HMR doesn't drop live channels.
 const MGR_KEY = Symbol.for("crafts.channel.manager");
 const SUB_KEY = Symbol.for("crafts.channel.subscriptions");
 type G = typeof globalThis & {
@@ -39,7 +25,7 @@ function getOrCreateChannel(ref: ChannelRef): Channel {
   const existing = CHANNELS.get(key);
   if (existing) {
     if (existing.graceTimer) {
-      clearTimeout(existing.graceTimer); // resubscribe within grace -> reuse warm channel
+      clearTimeout(existing.graceTimer);
       existing.graceTimer = null;
     }
     return existing.channel;
@@ -49,7 +35,6 @@ function getOrCreateChannel(ref: ChannelRef): Channel {
   return channel;
 }
 
-/** Schedule a drop when a channel's last subscriber leaves (cancelled by resubscribe). */
 function scheduleDropIfIdle(key: string): void {
   const entry = CHANNELS.get(key);
   if (!entry || entry.channel.refCount() > 0 || entry.graceTimer) return;
@@ -69,7 +54,6 @@ export interface SubscribeInput {
   channels: ChannelBinding[];
 }
 
-/** Create a fan-in subscription session for a craft. The SSE stream attaches later. */
 export async function subscribeChannels(input: SubscribeInput): Promise<{
   sessionId: string;
   channels: Array<{ channel: string; key: string; rev: number }>;
@@ -82,7 +66,7 @@ export async function subscribeChannels(input: SubscribeInput): Promise<{
   for (const b of input.channels) {
     const ref: ChannelRef = { provider: provider.kind, channel: b.channel, args: b.args ?? {} };
     const key = channelKey(ref);
-    getOrCreateChannel(ref); // lazily ensure it exists (loop starts on first subscriber)
+    getOrCreateChannel(ref);
     bindings.push({ key, channel: b.channel, as: b.as, pollS: b.poll_s });
     summary.push({ channel: b.channel, key, rev: 0 });
   }
@@ -100,7 +84,6 @@ export function getChannelByKey(key: string): Channel | undefined {
   return CHANNELS.get(key)?.channel;
 }
 
-/** route:direct relay backing POST /channel/{key}/request. */
 export async function requestDirect(
   key: string,
   op: string,
@@ -111,11 +94,6 @@ export async function requestDirect(
   return channel.request(op, args);
 }
 
-/**
- * Force an immediate re-poll of every channel a subscription session is bound
- * to, fanning fresh snapshots to all subscribers. Backs the "Refresh" button:
- * the live view updates instantly instead of waiting for the next tick.
- */
 export async function refreshSession(sessionId: string): Promise<number> {
   const session = SUBSCRIPTIONS.get(sessionId);
   if (!session) return 0;
@@ -153,17 +131,11 @@ export class SubscriptionSession {
     this.bindings = bindings;
   }
 
-  /**
-   * Attach the live SSE sink. Subscribes to every channel; frames from all
-   * channels multiplex onto the single `write`. Returns a teardown fn that
-   * unsubscribes all and schedules grace-drops.
-   */
   attach(write: (frame: ChannelFrame) => void): () => void {
     for (const b of this.bindings) {
       const channel = getChannelByKey(b.key);
       if (!channel) continue;
       const unsub = channel.subscribe(this.sessionId, b.as, b.pollS, (frame) => {
-        // tag with this craft's local alias (fan-in)
         write({ ...frame, as: b.as });
       });
       this.unsubs.push(() => {
@@ -179,7 +151,6 @@ export class SubscriptionSession {
       try {
         u();
       } catch {
-        /* ignore */
       }
     }
     this.unsubs = [];
@@ -192,6 +163,5 @@ export class SubscriptionSession {
 }
 
 export function makeId(prefix: string): string {
-  // No Date.now()/Math.random() at module scope; fine inside a request handler.
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 }

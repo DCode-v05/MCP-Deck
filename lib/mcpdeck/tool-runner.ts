@@ -1,9 +1,5 @@
 import { findTool } from "./catalogue";
 
-/**
- * Mock execution. Returns text the LLM can reason about.
- * `hasSideEffect: true` tools also "perform" their side effect — recorded in the replay entry.
- */
 export async function runMockTool(
   toolId: string,
   args: Record<string, unknown>,
@@ -11,7 +7,6 @@ export async function runMockTool(
   const tool = findTool(toolId);
   if (!tool) return { result: `Unknown tool: ${toolId}`, isError: true };
 
-  // Simulate network latency tied to the server.
   await wait(80 + Math.random() * 120);
 
   try {

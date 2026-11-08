@@ -25,7 +25,6 @@ export function UsageDashboard({ usage, servers }: Props) {
 
   return (
     <div className="h-full overflow-y-auto px-6 py-5 space-y-5 max-w-3xl mx-auto">
-      {/* Plan header */}
       <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -59,7 +58,6 @@ export function UsageDashboard({ usage, servers }: Props) {
         </div>
       </div>
 
-      {/* Headline stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard icon={Coins} label="Reasoning cost" value={`$${usage.totalCost.toFixed(4)}`} sub={`${fmt(usage.inputTokens)}↓ ${fmt(usage.outputTokens)}↑ tok`} />
         <StatCard icon={Activity} label="Tool calls" value={`${usage.toolInvocations}`} sub={`${usage.iterations} engine iterations`} />
@@ -67,7 +65,6 @@ export function UsageDashboard({ usage, servers }: Props) {
         <StatCard icon={Gauge} label="Data pulled" value={fmtBytes(totalBytes)} sub={fmtDuration(durationMs)} />
       </div>
 
-      {/* Per-server breakdown */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.25em] font-mono text-[var(--secondary)] mb-2 flex items-center gap-1.5">
           <Server className="h-3 w-3" /> Per-server usage

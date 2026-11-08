@@ -26,7 +26,6 @@ export class CraftSession {
     this.id = id;
     this.spec = spec;
     this.provider = provider;
-    // Only tools referenced by this generated craft may run — sandbox the session.
     this.allowed = new Set([
       ...spec.dataSources.map((d) => d.toolId),
       ...spec.actions.map((a) => a.toolId),

@@ -1,13 +1,3 @@
-/**
- * Craft authoring (bidirectional-engine-plan §1–5): the engine AUTHORS a live
- * UI as a <craft> tag instead of plain text. Given a user request + the real
- * MCP tool catalogue, the model writes ONE <craft> HTML tag with data-craft-bind
- * (data IN) and data-craft-emit (actions OUT), plus a <craft-live> sidecar of
- * subscribe[]/actions[] bound to REAL tool ids.
- *
- * Server-only (imports provider SDKs). The product runs it; the engine reasons
- * once to author, then stops.
- */
 import { getProvider, type ProviderId } from "@/lib/engine/providers";
 import type { AgentMessage } from "@/lib/engine/tools";
 import type { McpProvider } from "@/lib/mcpdeck/provider";
@@ -22,7 +12,7 @@ import {
 
 export interface AuthorResult {
   block: CraftBlock | null;
-  prose: string; // any text the model emitted outside the craft
+  prose: string;
   raw: string;
 }
 
@@ -101,7 +91,6 @@ export function buildAuthoringPrompt(provider: McpProvider): string {
   return lines.join("\n");
 }
 
-/** Validate the authored live-fields sidecar against the real catalogue. */
 function validateLive(
   json: string,
   provider: McpProvider,
@@ -114,19 +103,12 @@ function validateLive(
   }
   const knownTool = (id: unknown): id is string => typeof id === "string" && Boolean(provider.findTool(id));
 
-  // A tool is pollable for a live subscription only if its REQUIRED args are all
-  // satisfiable at authoring time. Tools needing a RUNTIME identifier (projectId,
-  // owner/repo, channel_id) can't be — the engine doesn't have those ids yet, and
-  // any value it invents (e.g. "__first__", "<projectId>") makes the API reject
-  // every poll. So: drop a subscription if any required arg is missing/empty, a
-  // placeholder, OR an id-shaped arg that isn't a real concrete value.
   const argsSatisfied = (toolId: string, args: Record<string, unknown>): boolean => {
     const req = provider.findTool(toolId)?.inputSchema.required ?? [];
     return req.every((k) => {
       const v = args[k];
       if (v === undefined || v === null || v === "") return false;
       if (typeof v === "string" && isPlaceholder(v)) return false;
-      // An id-shaped required arg the model couldn't actually know -> drop.
       if (looksLikeIdArg(k) && !isConcreteId(v)) return false;
       return true;
     });
@@ -140,12 +122,8 @@ function validateLive(
           channel: String(s.channel),
           args: cleanArgs((s.args && typeof s.args === "object" ? s.args : {}) as Record<string, unknown>),
           as: String(s.as),
-          // Short cadence so the view feels live; clamp anything slower than 8s
-          // down to 5s (and the channel floor is 500ms) for real-time updates.
           poll_s: typeof s.poll_s === "number" ? Math.min(s.poll_s, 8) : 5,
         }))
-        // Drop subscriptions whose required args aren't satisfiable yet
-        // (checks the CLEANED args, after placeholders/meta were stripped).
         .filter((s) => argsSatisfied(s.channel, s.args))
     : [];
 
@@ -156,7 +134,6 @@ function validateLive(
         .map((a): CraftAction => {
           const op = typeof a.op === "string" ? a.op : typeof a.channel === "string" ? String(a.channel) : undefined;
           const tool = op ? provider.findTool(op) : undefined;
-          // Safety: if the op is unknown or the route is missing, force route:engine.
           const route = a.route === "direct" && tool ? "direct" : "engine";
           return {
             name: String(a.name),
@@ -164,11 +141,9 @@ function validateLive(
             channel: typeof a.channel === "string" ? a.channel : op,
             op,
             args: cleanArgs((a.args && typeof a.args === "object" ? a.args : {}) as Record<string, unknown>),
-            // Trust the real catalogue for side-effect, not the model's claim.
             hasSideEffect: tool?.hasSideEffect ?? false,
             label: typeof a.label === "string" ? a.label : String(a.name),
             confirm: typeof a.confirm === "string" ? a.confirm : undefined,
-            // Per-row editable lists: carry the late-bound id binding through verbatim.
             idArg: typeof a.idArg === "string" ? a.idArg : undefined,
             idFrom: typeof a.idFrom === "string" ? a.idFrom : undefined,
             typeFrom: typeof a.typeFrom === "string" ? a.typeFrom : undefined,
@@ -179,19 +154,15 @@ function validateLive(
   return { subscribe, actions };
 }
 
-// ── arg hygiene (servers reject fabricated / meta args) ──
-
-/** Meta params some MCP servers list in their schema but REJECT when sent. */
 const STRIP_ARG_KEYS = new Set(["Notion-Version"]);
 
-/** Placeholder strings the model invents for ids it doesn't actually have. */
 const PLACEHOLDER_RE = /^(__|<|\{|\$|first$|latest$|todo$|your[-_]|the[-_]|example|placeholder|xxx|id$|uuid$)/i;
 
 function cleanArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    if (STRIP_ARG_KEYS.has(k)) continue; // drop meta params the server forbids
-    if (typeof v === "string" && isPlaceholder(v)) continue; // drop fabricated placeholders
+    if (STRIP_ARG_KEYS.has(k)) continue;
+    if (typeof v === "string" && isPlaceholder(v)) continue;
     out[k] = v;
   }
   return out;
@@ -207,34 +178,21 @@ function isPlaceholder(v: string): boolean {
   return false;
 }
 
-/** Required-arg names that denote a runtime identifier the engine can't know. */
 function looksLikeIdArg(key: string): boolean {
   return /(^|_)(id|ids)$|Id$|^owner$|^repo$|^channel_id$|^projectId$|^teamId$|^block_id$|^page_id$|^data_source_id$|^user_id$/i.test(
     key,
   );
 }
 
-/** A concrete id is a real UUID or a long-enough opaque token — not a word/placeholder. */
 function isConcreteId(v: unknown): boolean {
   if (typeof v !== "string") return false;
   const s = v.trim();
   if (isPlaceholder(s)) return false;
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuid.test(s)) return true;
-  // GitHub owner/repo are short words, not ids — those still can't be known at
-  // authoring time, so require they be absent (handled by looksLikeIdArg). A
-  // genuinely concrete opaque token is long + non-spacey.
   return s.length >= 16 && !/\s/.test(s);
 }
 
-/**
- * Phase 1 — RESOLVE. Before authoring, ask the model which read-only lookups it
- * needs to obtain concrete ids the request implies (e.g. the page_id of "Test
- * Page", the projectId of "the first project"). We run those reads and feed the
- * results back so phase-2 authoring can bind drill-in tools (get-block-children,
- * getProjectIssues, get_channel_history) with REAL ids — making per-entity
- * detail views work for every app.
- */
 async function resolveIds(
   request: string,
   provider: McpProvider,
@@ -258,8 +216,6 @@ async function resolveIds(
 
   const invoker = getProvider(providerId);
   let text = "";
-  // Resolve is load-bearing for editable/drill-in lists, so retry once on a
-  // transient provider overload before giving up.
   for (let attempt = 0; attempt < 2 && !text; attempt++) {
     try {
       const turn = invoker(prompt, [...priorMessages, { role: "user", content: request }], []);
@@ -267,10 +223,10 @@ async function resolveIds(
       await turn.done().catch(() => undefined);
     } catch {
       if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1200)); // brief backoff, then retry
+        await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
-      return ""; // give up; author without resolution
+      return "";
     }
   }
 
@@ -290,7 +246,6 @@ async function resolveIds(
       const { result, isError } = await provider.callTool(l.tool, args);
       if (!isError) facts.push(`${l.tool}(${JSON.stringify(args)}) ->\n${truncate(result, 1500)}`);
     } catch {
-      /* skip failed lookup */
     }
   }
   return facts.length > 0 ? `\n\n# Resolved data (use REAL ids from here)\n${facts.join("\n\n")}` : "";
@@ -300,10 +255,6 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n) + "…";
 }
 
-/**
- * Author a craft for a request. Resolves concrete ids first (phase 1), then
- * streams the provider through the parser to assemble a CraftBlock (phase 2).
- */
 export async function authorCraft(
   request: string,
   provider: McpProvider,
@@ -311,7 +262,6 @@ export async function authorCraft(
   onEvent?: (ev: ParserEvent) => void,
 ): Promise<AuthorResult> {
   const invoker = getProvider(opts.providerId);
-  // Phase 1: resolve ids the request needs (page_id, projectId, …).
   const resolved = await resolveIds(request, provider, opts.providerId, opts.priorMessages ?? []).catch(() => "");
   const userContent = resolved ? `${request}${resolved}` : request;
   const messages: AgentMessage[] = [...(opts.priorMessages ?? []), { role: "user", content: userContent }];

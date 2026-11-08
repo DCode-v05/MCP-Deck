@@ -25,7 +25,6 @@ export function DashboardIcon({ name, className }: { name: string; className?: s
   return <Icon className={className ?? "h-4 w-4"} />;
 }
 
-/** A small "live · rev N" pulse — proves the shared poll loop is ticking. */
 export function LiveBadge({ connected, rev }: { connected: boolean; rev: number }) {
   return (
     <span
@@ -50,7 +49,6 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Connected-but-empty: NOT an error — a setup step with exact instructions. */
 export function EmptyState({
   title,
   body,
@@ -90,7 +88,6 @@ export function EmptyState({
   );
 }
 
-/** Not connected — credential missing, server skipped at startup. */
 export function NotConnected({ label, credHint }: { label: string; credHint?: string }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-5 space-y-2 text-center">

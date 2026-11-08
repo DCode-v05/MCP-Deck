@@ -19,7 +19,6 @@ export function ToolInspector({ catalogue, state, enabledServerIds, onPin }: Pro
     return catalogue.filter((t) => !needle || t.id.toLowerCase().includes(needle));
   }, [catalogue, q]);
 
-  // Pinned + used tools float to the top; the long tail stays searchable below.
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
       const pa = state[a.id]?.pinned ? 1 : 0;

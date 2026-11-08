@@ -9,12 +9,6 @@ import type { AgentMessage, ToolDefinition } from "../tools/types";
 
 const MAX_OUTPUT_TOKENS = 16384;
 
-/**
- * OpenAI agent turn via the Responses API (`/v1/responses`). GPT-5 family
- * rejects `reasoning_effort` + `tools` on chat completions, so we use
- * Responses with `reasoning.effort: "none"` — the cheapest tier, fine for
- * our tool-dispatch loop.
- */
 export function createOpenAIAgent(model: string): AgentTurnInvoker {
   return (systemPrompt, messages, tools) => {
     let resolveDone!: (v: { usage: UsageMetadata; stopReason: StopReason }) => void;
@@ -41,8 +35,6 @@ export function createOpenAIAgent(model: string): AgentTurnInvoker {
           instructions: systemPrompt,
           input,
           tools: apiTools,
-          // "none" disables reasoning entirely. SDK ^4.104 types only know
-          // low/medium/high, but the API accepts "none" — cast required.
           reasoning: { effort: "none" as "low" },
           max_output_tokens: MAX_OUTPUT_TOKENS,
           stream: true,

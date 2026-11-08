@@ -13,8 +13,6 @@ interface Body {
   providerId?: ProviderId;
 }
 
-// POST /api/crafts/author — the engine authors a live craft for a request.
-// Returns the CraftBlock; the client renders it (live data fills via channels).
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const request = (body.request ?? "").trim();
@@ -41,7 +39,6 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "engine did not author a craft", prose }, { status: 422 });
     }
 
-    // Persist on the thread so a route:engine action can resume with context.
     thread.messages.push({ role: "user", content: request });
     thread.messages.push({ role: "assistant", content: `<craft key="${block.payload.key}">…authored…</craft>` });
     recordCraft(block);

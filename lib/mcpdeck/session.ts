@@ -17,7 +17,6 @@ import { mockProvider, type McpProvider } from "./provider";
 const PLAN_NAME = "McpDeck Pro (demo)";
 const REQUEST_QUOTA = 100;
 
-// Hoist into globalThis so Next.js HMR doesn't drop running sessions on reload.
 const SESSION_KEY = Symbol.for("mcpdeck.sessions");
 type GlobalWithSessions = typeof globalThis & {
   [SESSION_KEY]?: Map<string, McpDeckSession>;
@@ -37,8 +36,6 @@ export function getSession(id: string): McpDeckSession | undefined {
   return SESSIONS.get(id);
 }
 
-/** All sessions in this process — one per agent run. Backs the run history
- * (persists until the dev server restarts; no DB). */
 export function listSessions(): McpDeckSession[] {
   return [...SESSIONS.values()];
 }
@@ -56,9 +53,7 @@ export class McpDeckSession {
   readonly provider: McpProvider;
   goal: string | null = null;
   status: SessionSnapshot["status"] = "idle";
-  /** When this run was created (for the history list, sorted most-recent-first). */
   readonly startedAt = Date.now();
-  /** The engine's closing summary, set on engine_done (shown in history). */
   finalSummary: string | null = null;
 
   private servers: Map<string, McpServerState> = new Map();
@@ -74,7 +69,6 @@ export class McpDeckSession {
   private disposed = false;
   private stopRequested = false;
 
-  // --- usage / subscription accounting ---
   private usage: UsageStats;
   private serverUsage: Map<string, ServerUsage> = new Map();
 
@@ -127,7 +121,6 @@ export class McpDeckSession {
     for (const n of provider.initialResources) this.resources.set(n.id, n);
   }
 
-  // --- provider accessors (used by the engine) ---
   serverInfos(): McpServerInfo[] {
     return this.provider.servers;
   }
@@ -144,12 +137,9 @@ export class McpDeckSession {
     return this.provider.callTool(toolId, args);
   }
 
-  // --- subscription ---
   subscribe(cb: Subscriber): () => void {
     this.subscribers.add(cb);
-    // Replay buffered events to late subscribers so reloads pick up state.
     for (const ev of this.buffer) cb(ev);
-    // Start the health-ping loop while at least one client is watching.
     this.startPingLoop();
     return () => {
       this.subscribers.delete(cb);
@@ -157,7 +147,6 @@ export class McpDeckSession {
     };
   }
 
-  // --- live server pings ---
   private pingTimer: ReturnType<typeof setInterval> | null = null;
 
   private startPingLoop(): void {
@@ -176,7 +165,6 @@ export class McpDeckSession {
     for (const s of this.servers.values()) {
       if (!s.enabled) continue;
       const base = this.provider.findServer(s.id)?.latencyMs ?? 50;
-      // Jitter around the server's nominal latency; occasionally degrade.
       const jitter = Math.round((Math.random() - 0.4) * base * 0.6);
       s.latencyMs = Math.max(4, base + jitter);
       const roll = Math.random();
@@ -188,16 +176,13 @@ export class McpDeckSession {
 
   emit(ev: McpDeckEvent): void {
     if (this.disposed) return;
-    // Capture the closing summary for the history list, wherever it's emitted.
     if (ev.type === "engine_done") this.finalSummary = ev.summary;
     this.buffer.push(ev);
-    // Trim buffer to keep memory bounded.
     if (this.buffer.length > 500) this.buffer.splice(0, this.buffer.length - 500);
     for (const s of this.subscribers) {
       try {
         s(ev);
       } catch {
-        // ignore subscriber failures so one bad sink doesn't break the loop
       }
     }
   }
@@ -209,7 +194,6 @@ export class McpDeckSession {
     this.emit({ type: "log", level, message });
   }
 
-  // --- snapshot ---
   snapshot(): SessionSnapshot {
     return {
       sessionId: this.sessionId,
@@ -234,7 +218,6 @@ export class McpDeckSession {
     this.emit({ type: "usage_state", usage: this.usageSnapshot() });
   }
 
-  // --- usage / subscription accounting ---
   private usageSnapshot(): UsageStats {
     return {
       ...this.usage,
@@ -270,7 +253,6 @@ export class McpDeckSession {
     this.usage.toolInvocations += 1;
   }
 
-  // --- server / tool control ---
   toggleServer(serverId: string, enabled: boolean): void {
     const s = this.servers.get(serverId);
     if (!s) return;
@@ -296,11 +278,6 @@ export class McpDeckSession {
     return [...this.tools.values()].filter((t) => t.pinned).map((t) => t.id);
   }
 
-  /**
-   * Snapshot of live state the engine should condition each iteration on.
-   * This is the "read project + server data" step in the loop: every iteration
-   * the engine pulls this and folds it into the system prompt.
-   */
   readContext(): {
     enabledServers: string[];
     pinnedTools: string[];
@@ -323,7 +300,6 @@ export class McpDeckSession {
     };
   }
 
-  // --- resources ---
   async expandResourceNode(nodeId: string): Promise<void> {
     const children = await this.provider.expandResource(nodeId);
     if (children.length === 0) return;
@@ -339,14 +315,12 @@ export class McpDeckSession {
     }
   }
 
-  // --- approvals (pause-on-approval primitive) ---
   awaitApproval(req: Omit<PendingApproval, "createdAt">): Promise<ApprovalVerdict> {
     const pending: PendingApproval = { ...req, createdAt: Date.now() };
     this.pending.set(req.requestId, pending);
     this.status = "awaiting_input";
     this.emit({ type: "approval_pending", pending });
 
-    // Auto-approve if user previously selected "approve and remember".
     const key = `${req.serverId}::${req.toolId}`;
     if (this.remembered.has(key)) {
       this.logEvent("info", `auto-approved ${req.toolId} (remembered)`);
@@ -377,7 +351,6 @@ export class McpDeckSession {
     return true;
   }
 
-  // --- replay log ---
   recordToolStart(entry: Omit<ReplayEntry, "completedAt" | "result" | "isError">): ReplayEntry {
     const full: ReplayEntry = { ...entry, completedAt: null, result: null, isError: false };
     this.replay.push(full);
@@ -411,12 +384,10 @@ export class McpDeckSession {
       t.lastIsError = isError;
       this.emit({ type: "tool_state", state: { ...t } });
     }
-    // Roll the result into per-server usage (bytes ≈ result length).
     this.recordServerActivity(entry.serverId, result.length, isError);
     this.emitUsage();
   }
 
-  /** Direct accessors used by replay/branch flows. */
   getReplayEntry(replayId: string): ReplayEntry | undefined {
     return this.replay.find((r) => r.id === replayId);
   }
@@ -429,7 +400,6 @@ export class McpDeckSession {
     this.stopRequested = false;
   }
 
-  // --- lifecycle ---
   requestStop(): void {
     this.stopRequested = true;
     for (const id of [...this.resolvers.keys()]) {

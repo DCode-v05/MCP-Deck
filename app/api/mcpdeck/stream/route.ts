@@ -5,7 +5,6 @@ import type { McpDeckEvent } from "@/lib/mcpdeck/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Reconnect endpoint: subscribe to an existing session without starting a new run.
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("sessionId") ?? "";
   const session = getSession(sessionId);
@@ -50,7 +49,6 @@ export async function GET(req: NextRequest) {
         try {
           controller.close();
         } catch {
-          /* already closed */
         }
       };
       req.signal.addEventListener("abort", cleanup);

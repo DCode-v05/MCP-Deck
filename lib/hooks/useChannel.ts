@@ -21,29 +21,21 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<Cha
       try {
         yield JSON.parse(data) as ChannelFrame;
       } catch {
-        /* ignore heartbeats / partials */
       }
     }
   }
 }
 
 export interface ChannelState {
-  /** latest payload per craft-local alias (`as`) */
   data: Record<string, unknown>;
-  /** latest rev per alias — proves shared fan-out when two crafts match */
   rev: Record<string, number>;
   connected: boolean;
 }
 
-/**
- * Subscribe a craft to one or more channels (fan-in: one SSE, many channels).
- * Returns the latest data + rev per `as` alias, and a route:direct `request`.
- */
 export function useChannel(threadId: string, craftId: string, channels: ChannelBinding[]) {
   const [state, setState] = useState<ChannelState>({ data: {}, rev: {}, connected: false });
   const keyByChannel = useRef<Record<string, string>>({});
   const sessionIdRef = useRef<string | null>(null);
-  // stable signature so the effect re-subscribes only when the channel set changes
   const sig = JSON.stringify(channels);
 
   useEffect(() => {
@@ -73,7 +65,6 @@ export function useChannel(threadId: string, craftId: string, channels: ChannelB
           }));
         }
       } catch {
-        /* aborted */
       } finally {
         if (!cancelled) setState((s) => ({ ...s, connected: false }));
       }
@@ -86,9 +77,6 @@ export function useChannel(threadId: string, craftId: string, channels: ChannelB
   }, [threadId, craftId, sig]);
 
   async function request(channel: string, op: string, args: Record<string, unknown> = {}) {
-    // If the channel is a subscribed one, relay through it; otherwise (e.g. a
-    // WRITE op like patch-page the craft never subscribes to) use the keyless
-    // /call route so the action never silently no-ops on a channel mismatch.
     const key = keyByChannel.current[channel];
     const url = key ? `/api/channel/request/${encodeURIComponent(key)}` : `/api/channel/call`;
     const res = await fetch(url, {
@@ -99,8 +87,6 @@ export function useChannel(threadId: string, craftId: string, channels: ChannelB
     return res.json();
   }
 
-  /** Force an immediate re-poll of all this craft's channels; fresh data fans
-   *  back over the open SSE so the bound UI updates live. */
   async function refresh(): Promise<void> {
     const sid = sessionIdRef.current;
     if (!sid) return;

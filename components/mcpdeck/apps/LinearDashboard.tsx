@@ -8,7 +8,6 @@ interface Viewer { name?: string; email?: string; displayName?: string; }
 interface Team { id: string; name: string; key: string; }
 interface Project { id: string; name: string; state?: string; progress?: number; }
 
-/** Linear tools return either an array directly or {nodes:[...]}; tolerate both. */
 function asArray<T>(payload: unknown): T[] | null {
   if (Array.isArray(payload)) return payload as T[];
   if (payload && typeof payload === "object") {
@@ -26,7 +25,6 @@ export function LinearDashboard({ def }: { def: DashboardDef }) {
 
   return (
     <div className="space-y-4">
-      {/* Identity header */}
       <div className="rounded-xl border p-4 flex items-center justify-between" style={{ background: `${def.accent}0D`, borderColor: `${def.accent}33` }}>
         <div className="flex items-center gap-3">
           <span className="h-9 w-9 rounded-lg flex items-center justify-center font-display font-bold" style={{ background: `${def.accent}1A`, color: def.accent }}>
@@ -40,7 +38,6 @@ export function LinearDashboard({ def }: { def: DashboardDef }) {
         <LiveBadge connected={dash.connected} rev={dash.rev.viewer ?? 0} />
       </div>
 
-      {/* Teams */}
       <div>
         <SectionLabel>Teams</SectionLabel>
         {teams.status === "loading" && <Skeleton rows={1} />}
@@ -57,7 +54,6 @@ export function LinearDashboard({ def }: { def: DashboardDef }) {
         )}
       </div>
 
-      {/* Projects */}
       <div>
         <div className="flex items-center justify-between">
           <SectionLabel>Projects</SectionLabel>

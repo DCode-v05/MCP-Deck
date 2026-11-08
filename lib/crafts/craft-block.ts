@@ -1,14 +1,3 @@
-/**
- * The craft block — the single envelope for ALL engine-authored UI
- * (bidirectional-engine-plan §1–5). The engine authors a <craft> tag; a parser
- * turns it into this block; the product renders/stores/runs it.
- *
- * Client+server safe: pure types + helpers, NO React, NO provider SDK imports
- * (it sits beside server-only authoring code, so a stray import here would drag
- * node-only deps into the client bundle).
- */
-
-// ── §2 the three axes ──
 export type Surface = "inline" | "panel";
 export type CraftFormat = "html" | "markdown" | "code" | "svg";
 
@@ -21,56 +10,48 @@ export function isFormat(v: unknown): v is CraftFormat {
   return typeof v === "string" && (FORMATS as string[]).includes(v);
 }
 
-// ── §7 live craft fields ──
 export type Route = "direct" | "engine";
 
-/** A channel the craft subscribes to (data IN). */
 export interface Subscribe {
-  channel: string; // a real tool id, e.g. "github.search_repositories"
+  channel: string;
   args?: Record<string, unknown>;
-  as: string; // craft-local alias the markup binds to via data-craft-bind="<as>"
+  as: string;
   poll_s: number;
 }
 
-/** An authored action (data OUT). Routing is STAMPED at authoring time (§6). */
 export interface CraftAction {
-  name: string; // referenced by data-craft-emit="<name>"
-  route: Route; // "direct" = channel call, no engine · "engine" = resume thread
-  channel?: string; // route:direct -> which channel/tool op to call (a SUBSCRIBED channel)
-  op?: string; // the tool id to invoke (the WRITE tool, may differ from channel)
+  name: string;
+  route: Route;
+  channel?: string;
+  op?: string;
   args?: Record<string, unknown>;
-  hasSideEffect?: boolean; // a WRITE -> the renderer forces an approval gate
+  hasSideEffect?: boolean;
   label?: string;
-  confirm?: string; // human-readable confirm text for the approval modal
-  // ── per-row editable lists (data-craft-each) — the row id is late-bound ──
-  /** arg path the captured per-row id is injected at, e.g. "block_id" | "id" | "issue_number" */
+  confirm?: string;
   idArg?: string;
-  /** dot path to the row's own id field (default "id"; e.g. "number" for GitHub) */
   idFrom?: string;
-  /** dot path to the row's type, for the Notion update body-key {type} splice (e.g. "type") */
   typeFrom?: string;
-  /** runtime-only: set by the renderer when args are already fully assembled (per-row write). */
   _argsFinal?: boolean;
 }
 
 export interface CraftPayload {
-  key: string; // engine's stable kebab id; same across versions
+  key: string;
   surface: Surface;
   format: CraftFormat;
-  wait: boolean; // does the stream pause for the user?
-  language: string | null; // only when format === "code"
+  wait: boolean;
+  language: string | null;
   title: string;
-  content: string; // the authored markup (appends while streaming)
-  version: number; // starts at 1; +1 per edit of same key
-  subscribe: Subscribe[]; // live data IN
-  actions: CraftAction[]; // actions OUT (route-stamped)
+  content: string;
+  version: number;
+  subscribe: Subscribe[];
+  actions: CraftAction[];
 }
 
 export interface CraftBlock {
-  id: string; // wire identity — for updates & post-back
+  id: string;
   type: "craft";
   thread_id: string;
-  ts: string; // ISO-8601
+  ts: string;
   payload: CraftPayload;
 }
 
@@ -86,7 +67,7 @@ export interface NewCraftArgs {
   content: string;
   subscribe?: Subscribe[];
   actions?: CraftAction[];
-  ts: string; // caller stamps (no Date.now in shared code)
+  ts: string;
 }
 
 export function newCraftBlock(a: NewCraftArgs): CraftBlock {
@@ -110,7 +91,6 @@ export function newCraftBlock(a: NewCraftArgs): CraftBlock {
   };
 }
 
-/** §9–10: an edit re-authors the same key -> same id, version+1. */
 export function bumpCraftVersion(prev: CraftBlock, patch: Partial<CraftPayload>, ts: string): CraftBlock {
   return {
     ...prev,
@@ -119,10 +99,6 @@ export function bumpCraftVersion(prev: CraftBlock, patch: Partial<CraftPayload>,
   };
 }
 
-// ── sanitizer (server-safe, no DOM) ──
-// The craft content is OUR engine's output, but we still strip anything that
-// could execute or escape: scripts, event handlers, iframes, javascript: urls.
-// The renderer keeps interactivity through data-craft-* attributes only.
 const FORBIDDEN_TAGS = /<\/?(script|iframe|object|embed|link|meta|style|form|base)\b[^>]*>/gi;
 const EVENT_HANDLERS = /\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
 const JS_URLS = /\b(href|src|action)\s*=\s*("javascript:[^"]*"|'javascript:[^']*')/gi;
@@ -134,7 +110,6 @@ export function sanitizeCraftHtml(html: string): string {
     .replace(JS_URLS, "");
 }
 
-/** Slugify a title into a stable kebab key when the engine omits one. */
 export function slugKey(title: string): string {
   return (
     title

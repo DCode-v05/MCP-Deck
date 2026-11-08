@@ -7,12 +7,6 @@ import {
 } from "./catalogue";
 import { runMockTool } from "./tool-runner";
 
-/**
- * A provider is the source of MCP servers/tools/resources and the executor for
- * tool calls. The mock provider uses the built-in catalogue; the real provider
- * connects to live MCP servers via the SDK. Everything above this interface
- * (session, engine, UI) is provider-agnostic.
- */
 export interface McpProvider {
   readonly kind: "mock" | "real";
   readonly servers: McpServerInfo[];
@@ -45,8 +39,6 @@ class MockProvider implements McpProvider {
 
 const MOCK = new MockProvider();
 
-// Cache the resolved provider across HMR so we don't reconnect real servers
-// on every request.
 const PROVIDER_KEY = Symbol.for("mcpdeck.provider");
 type GlobalWithProvider = typeof globalThis & {
   [PROVIDER_KEY]?: Promise<McpProvider>;
@@ -63,10 +55,8 @@ async function resolveProvider(): Promise<McpProvider> {
   const raw = process.env.MCPDECK_SERVERS?.trim();
   if (!raw) return MOCK;
   try {
-    // Lazy import so the SDK is only loaded when real servers are configured.
     const { buildRealProvider } = await import("./real-client");
     const real = await buildRealProvider(raw);
-    // If no real server connected, fall back to mock so the demo still works.
     return real && real.servers.length > 0 ? real : MOCK;
   } catch (err) {
     console.error("[mcpdeck] real provider failed, falling back to mock:", err);

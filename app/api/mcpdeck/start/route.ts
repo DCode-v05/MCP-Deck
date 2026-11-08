@@ -26,8 +26,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Reuse session if the client supplied an existing one and it still exists,
-  // otherwise create one bound to the active provider (mock or real MCP).
   const provider = await getMcpProvider();
   const session =
     (body.sessionId && getSession(body.sessionId)) || createSession(provider);
@@ -49,17 +47,13 @@ export async function POST(req: NextRequest) {
 
       const unsubscribe = session.subscribe(write);
 
-      // Burst current state to the new subscriber.
       session.emitSnapshot();
 
-      // Fire the engine — its events stream through the subscriber above.
-      // We do NOT await here; the SSE response stays open as the engine runs.
       runMcpDeck(session, { providerId, goal }).catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         session.emit({ type: "error", message: msg });
       });
 
-      // Heartbeat every 15s to keep the connection alive through proxies.
       const heartbeat = setInterval(() => {
         if (closed) return;
         try {
@@ -76,7 +70,6 @@ export async function POST(req: NextRequest) {
         try {
           controller.close();
         } catch {
-          /* already closed */
         }
       };
 

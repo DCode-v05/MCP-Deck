@@ -16,7 +16,6 @@ interface Repo {
   html_url: string;
 }
 
-/** github.search_repositories returns { total_count, items: Repo[] }. */
 function extractRepos(payload: unknown): Repo[] | null {
   if (payload == null || typeof payload !== "object") return null;
   const items = (payload as { items?: unknown }).items;

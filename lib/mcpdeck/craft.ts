@@ -1,17 +1,9 @@
 import type { McpProvider } from "./provider";
 
-/**
- * A "craft" is a live app the ENGINE authors from a prompt (not hand-coded).
- * It binds to real MCP tools: data sources populate the UI (engine→UI), action
- * buttons perform side effects gated by approval (engine→real world).
- *
- * The LLM emits this as JSON; the product renders + runs it.
- */
-
 export interface CraftDataSource {
-  id: string; // local name referenced by blocks
+  id: string;
   label: string;
-  toolId: string; // must be a known MCP tool
+  toolId: string;
   args: Record<string, unknown>;
 }
 
@@ -25,7 +17,7 @@ export type CraftBlock =
 export interface CraftAction {
   id: string;
   label: string;
-  toolId: string; // must be a known MCP tool
+  toolId: string;
   args: Record<string, unknown>;
   sideEffect: boolean;
 }
@@ -41,7 +33,6 @@ export interface CraftSpec {
 
 const ACCENTS = ["#EC3B4A", "#2E86C0", "#1F9D57", "#7A4DD6", "#C0642E", "#0E8C7F"];
 
-/** Extract the first balanced JSON object from an LLM response (handles ``` fences + prose). */
 export function extractJson(raw: string): unknown {
   let s = raw.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -52,10 +43,6 @@ export function extractJson(raw: string): unknown {
   return JSON.parse(s.slice(start, end + 1));
 }
 
-/**
- * Validate + sanitise an LLM-authored spec against the live provider:
- * drop unknown tools, dangling block sources, etc. Returns a safe CraftSpec.
- */
 export function validateCraft(input: unknown, provider: McpProvider): CraftSpec {
   const obj = (input ?? {}) as Record<string, unknown>;
   const knownTool = (id: unknown): id is string =>

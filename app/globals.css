@@ -42,7 +42,6 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Atmospheric backdrop — subtle warm radial gradients */
 body::before {
   content: "";
   position: fixed;
@@ -54,7 +53,6 @@ body::before {
     radial-gradient(ellipse 60% 40% at 100% 100%, rgba(168, 35, 47, 0.025) 0%, transparent 70%);
 }
 
-/* Refined markdown prose */
 .md-prose {
   color: var(--foreground);
 }
@@ -108,7 +106,6 @@ body::before {
   margin-block: 0.75rem;
 }
 
-/* Widget bubble entrance animation */
 @keyframes mcpdeck-bubble-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -117,7 +114,6 @@ body::before {
   animation: mcpdeck-bubble-in 0.35s ease-out;
 }
 
-/* Refined scrollbar */
 .scroll-area::-webkit-scrollbar { width: 6px; }
 .scroll-area::-webkit-scrollbar-thumb {
   background: var(--border);
@@ -127,23 +123,16 @@ body::before {
   background: var(--secondary);
 }
 
-/* Selection */
 ::selection {
   background: #EC3B4A;
   color: white;
 }
 
-/* Engine-authored craft body.
-   The engine writes its own colors, which often clash with our dark theme
-   (e.g. light text on light, or low-contrast headings). We FORCE readable
-   contrast: the body uses theme tokens and headings inherit the foreground,
-   overriding any inline color/background the engine picked. */
 .craft-body {
   color: var(--foreground);
   font-size: 13px;
   line-height: 1.55;
 }
-/* Neutralize engine-authored backgrounds/colors that break contrast. */
 .craft-body [style*="color"],
 .craft-body [style*="background"] {
   color: var(--foreground) !important;
@@ -162,7 +151,6 @@ body::before {
 .craft-body a { color: #EC3B4A !important; text-decoration: none; }
 .craft-body a:hover { text-decoration: underline; }
 .craft-body hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
-/* Keep our own data-render classes from being flattened by the rule above. */
 .craft-body .craft-list li { background: var(--surface-2) !important; }
 
 .craft-body button[data-craft-emit] {
@@ -184,7 +172,6 @@ body::before {
   border: 1px solid var(--border); font-size: 11px; overflow: auto; max-height: 320px;
 }
 
-/* craft input fields (data-craft-input) */
 .craft-body input[data-craft-input],
 .craft-body textarea[data-craft-input],
 .craft-body select[data-craft-input] {

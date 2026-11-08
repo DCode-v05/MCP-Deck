@@ -13,7 +13,6 @@ interface NotionItem {
   properties?: Record<string, unknown>;
 }
 
-/** notion.API-post-search returns { results: [...] }. */
 function extractResults(payload: unknown): NotionItem[] | null {
   if (payload == null || typeof payload !== "object") return null;
   const results = (payload as { results?: unknown }).results;
@@ -21,7 +20,6 @@ function extractResults(payload: unknown): NotionItem[] | null {
 }
 
 function titleOf(item: NotionItem): string {
-  // Notion page titles live in properties.<Name>.title[].plain_text — best effort.
   const props = item.properties ?? {};
   for (const v of Object.values(props)) {
     const t = (v as { title?: Array<{ plain_text?: string }> })?.title;

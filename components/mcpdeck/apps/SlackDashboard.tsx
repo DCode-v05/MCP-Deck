@@ -12,7 +12,6 @@ interface SlackChannel {
   num_members?: number;
 }
 
-/** slack.slack_list_channels returns { ok, channels: [...] }. */
 function extractChannels(payload: unknown): SlackChannel[] | null {
   if (payload == null || typeof payload !== "object") return null;
   const ch = (payload as { channels?: unknown }).channels;

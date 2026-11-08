@@ -10,7 +10,6 @@ import { NotionDashboard } from "./NotionDashboard";
 import { SlackDashboard } from "./SlackDashboard";
 
 interface Props {
-  /** from /api/mcpdeck/catalogue — the connected servers (real-client only lists what connected) */
   servers: McpServerInfo[];
   providerKind: "mock" | "real" | null;
 }
@@ -23,11 +22,8 @@ const RENDERERS: Record<string, (def: DashboardDef) => React.ReactNode> = {
 };
 
 export function AppsMode({ servers, providerKind }: Props) {
-  // Connection is derived from the CATALOGUE, not the agent SSE (which is empty
-  // until a goal runs). A dashboard is "connected" iff its server id is present.
   const connectedIds = useMemo(() => new Set(servers.map((s) => s.id)), [servers]);
 
-  // Dashboards we have a renderer for, ordered: connected first.
   const tabs = useMemo(
     () =>
       DASHBOARDS.filter((d) => RENDERERS[d.serverId]).sort(
@@ -59,7 +55,6 @@ export function AppsMode({ servers, providerKind }: Props) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Server switcher */}
       <div className="border-b border-[var(--border)] px-4 py-2 flex items-center gap-1 overflow-x-auto">
         {tabs.map((d) => {
           const connected = connectedIds.has(d.serverId);
@@ -81,7 +76,6 @@ export function AppsMode({ servers, providerKind }: Props) {
         })}
       </div>
 
-      {/* Active dashboard */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-5">
           {!active ? (
