@@ -1,73 +1,207 @@
 # MCP Deck
 
-An agent that works across your GitHub, Notion, Linear and Slack accounts through MCP servers, and can build live UI panels that keep themselves in sync with those accounts.
+**A persistent, autonomous agent that works across your real SaaS accounts (GitHub, Notion, Linear, Slack) and authors live, self-updating UI as it goes.**
 
-I built it at September AI as one of their agentic-UI prototypes, to see what the Model Context Protocol changes about an assistant interface. It is an in-memory prototype with no database and no auth. The agent loop, write approvals, the channel subsystem and craft authoring all run, either against real accounts or built-in mock servers.
+![Next.js](https://img.shields.io/badge/Next.js_15-000000?style=flat&logo=nextdotjs&logoColor=white) ![React](https://img.shields.io/badge/React_19-20232A?style=flat&logo=react&logoColor=61DAFB) ![TypeScript](https://img.shields.io/badge/TypeScript_5.7-3178C6?style=flat&logo=typescript&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_3.4-06B6D4?style=flat&logo=tailwindcss&logoColor=white) ![MCP](https://img.shields.io/badge/Model_Context_Protocol-1.29-6E56CF?style=flat&logo=anthropic&logoColor=white) ![Anthropic](https://img.shields.io/badge/Anthropic-D97757?style=flat&logo=anthropic&logoColor=white) ![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white) ![Google Gemini](https://img.shields.io/badge/Gemini-8E75B2?style=flat&logo=googlegemini&logoColor=white)
 
-## What it does
+## Overview
 
-- You give the agent a short goal, for example "summarise the open Linear issues for the auth project into a Notion page". It works through connected tools in a fixed cycle: orient, survey, plan, act, verify, finish.
-- Read tools run on their own. Write tools stop at an approval card where you can approve, approve and remember, deny, or edit the arguments first.
-- The agent can emit a "craft", an HTML panel bound to real tools. Data polls in, and edits save back to the account after a short debounce, with no refresh or save button.
-- The run lives in a server-side session, so it survives a page reload.
+MCP Deck rethinks the chatbot. A normal LLM chat is a one-shot exchange: you ask, it answers, the loop ends. That breaks down once a task spans several apps, takes many steps, or needs to *stay live* after the answer arrives.
 
-## How it works
+MCP Deck changes that in three ways. It's an **agent**: one short, high-level goal starts a methodical operating cycle across your connected tools. It's **persistent**: the run lives in a server-side session that survives page reloads and dev hot-reloads. And it drives **bidirectional, live UI**: instead of answering only in prose, the agent can emit a *craft*, a live HTML panel bound to real MCP tools, where data polls in by itself and your edits save themselves back to your accounts. No Refresh button, no Save button.
 
-**Agent loop** (`lib/mcpdeck/engine.ts`). `runMcpDeck()` runs up to `MAX_ITERATIONS = 20` turns. The `OPERATING_PROCEDURE` system prompt tells the model to treat all connected servers as one graph and follow cross-app references (a repo name, an assignee, a ticket link) into the app that owns them. Each turn the engine folds the session state (enabled servers, pinned tools, recent results) into the prompt and streams one model turn. Besides the real MCP tools the model gets two synthetic ones, `render_ui` to emit a craft and `finish` to end the run.
+I built this during my AI engineering role at September AI (September Platforms), as one of a set of agentic-UI prototypes exploring how the Model Context Protocol changes what an assistant interface can be. It's an in-memory prototype with no database and no auth. The agent loop, the approval gating, the channel subsystem and craft authoring are all wired up and run, either against real GitHub / Notion / Linear / Slack accounts or against built-in mock servers.
 
-**Tool calls.** `callToolRobust()` caps each call at `TOOL_TIMEOUT_MS = 45_000`. Reads retry once. Writes never retry, so a write can't repeat its side effect.
+## Key Features
 
-**Read or write.** For real MCP servers, a tool counts as a write if its name matches a deliberately broad regex (`write|create|delete|update|send|merge|archive...`). It over-flags on purpose, since an extra confirmation costs less than a missed write. Writes call `session.awaitApproval()` and block until you answer.
+- **Autonomous cross-app agent.** A single short goal (e.g. *"summarize the open Linear issues for the auth project into a Notion page"*) starts a full reasoning cycle across every connected app, treated as one shared knowledge graph.
+- **A fixed operating procedure.** ORIENT → SURVEY → PLAN → ACT → VERIFY → FINISH is written into the agent's system prompt, with a hard budget of 20 turns and exactly one tool call per turn.
+- **Auto-read, approve-write gating.** Read tools run automatically. Write tools pause at a human approval card where you can approve, approve-and-remember, deny, or edit the proposed arguments before they run.
+- **Engine-authored live crafts.** When the agent decides an editable panel beats prose, it authors a sanitized HTML craft whose data auto-polls in and whose edits auto-save out, with no buttons.
+- **A channel subsystem** that deduplicates polling: identical data subscriptions share one poll loop, so 50 panels watching the same resource fetch it once, not 50 times.
+- **A `/generate` studio.** A separate prompt-to-app surface that emits a validated JSON craft spec of themed blocks, with no agent loop.
+- **Real MCP integration over stdio.** Connect GitHub / Notion / Linear / Slack MCP servers through one JSON config, or fall back to built-in mock servers with no setup.
+- **Multi-provider LLM backend.** Anthropic, OpenAI and Google models sit behind one provider-agnostic agent interface.
+- **A live reasoning trace** showing the agent's thinking, every tool call, approvals and inline craft panels, plus a usage dashboard (tokens, cost, per-server metrics) and a searchable tool inspector.
+- **Hardened tool execution.** Per-tool wall-clock timeouts, one retry for reads and none for writes, so a write never repeats a side effect.
 
-**Crafts** (`lib/crafts/authoring.ts`, `components/crafts/CraftRenderer.tsx`). `authorCraft()` first does up to 3 read-only lookups to bind the panel to real IDs, then streams a sanitised `<craft>` HTML tag with a `<craft-live>` JSON sidecar. `<script>`, `<iframe>`, `<form>`, inline event handlers and `javascript:` URLs are stripped. Bound values are written with `textContent` or `.value`, never `innerHTML`.
+## How It Works
 
-**Channels** (`lib/channels/`, `app/api/channel/`). A channel is one poll loop with a revision-stamped frame buffer and a set of subscribers, keyed by a hash of `{ provider, channel, args }`. Identical subscriptions share a channel, so fifty panels watching one resource poll it once. The poll interval follows the fastest subscriber with a 500 ms floor, and a channel is dropped 20 s after its last unsubscribe. There is no model call per poll.
+### The autonomous agent (`lib/mcpdeck/engine.ts`)
 
-**`/generate` studio** (`lib/mcpdeck/generate.ts`). A separate one-shot surface with no agent loop. `generateCraft()` turns a description into a validated JSON `CraftSpec` of blocks (`stat`, `table`, `list`, `source`, `text`) bound to tools. Data refreshes on demand, and writes go through an approval modal. `CraftSession` only lets tools declared in the spec run.
+The core is `runMcpDeck()`, a loop that runs up to **`MAX_ITERATIONS = 20`** turns. It's driven by the `OPERATING_PROCEDURE` system prompt, which tells the model to treat all connected MCP servers as **one knowledge graph**. Every page, issue, repo, PR, channel or person is a *node*, and any cross-app reference inside a node (a repo name, an assignee, a file path, a ticket link) is a *pointer* to follow into the app that owns it.
 
-**Real servers or mocks** (`lib/mcpdeck/provider.ts`, `real-client.ts`). Set `MCPDECK_SERVERS` to a JSON array of stdio server configs. Each server starts only if its credential is present, and they connect in parallel under a 45 s timeout. On Windows it handles the `.cmd` shims for `npx` and `npm`. With nothing configured the app uses built-in mock `git` and `linear` servers.
+Every goal runs as one forward cycle:
 
-**LLM providers.** Anthropic, OpenAI and Google adapters live in `lib/engine/providers/`.
+- **ORIENT:** restate the goal as a testable hypothesis: what "done" means, and which app holds the starting node.
+- **SURVEY:** discover with read tools, follow cross-app pointers, resolve names to real IDs, and look for evidence against the current guess so a confident-but-wrong idea can't drive a write.
+- **PLAN:** work out the deliverable from observed data (acceptance criteria, issue bodies, conventions) and state the smallest ordered list of writes that leaves everything consistent.
+- **ACT:** run one write at a time, smallest scope first. Every write pauses for approval, and the agent never overwrites content it hasn't read.
+- **VERIFY:** re-read each affected node to confirm the write landed.
+- **FINISH:** call `finish` with a concrete summary (real IDs, links, what changed in each app), optionally calling `render_ui` first to emit a live panel.
+
+Each turn, the engine snapshots live state via `session.readContext()` (enabled servers, pinned tools, opened resources, recent tool results), folds it into the system prompt, streams one LLM turn, and processes the resulting tool calls. The model also gets two synthetic tools next to the real MCP ones: `render_ui` (emit a live craft) and `finish` (end the run).
+
+Tool execution is wrapped by `callToolRobust()`, which caps each call at **`TOOL_TIMEOUT_MS = 45_000`**. Reads retry once on failure. Writes never retry, to avoid duplicate side effects. The 20-turn budget stops any run that starts to spiral.
+
+### Auto-read, approve-write
+
+Whether a tool is a read or a write is decided by a `hasSideEffect` flag. For real MCP servers it's inferred by a deliberately broad regex over the tool name:
+
+```
+/write|create|delete|update|patch|send|set|put|^post|add|remove|move|
+rename|comment|archive|invite|merge|close|reopen|assign|upload|edit|
+destroy|cancel|approve|reject/i
+```
+
+It over-flags on purpose: one extra confirmation is cheaper than letting a write slip through. Reads run immediately. Writes call `session.awaitApproval()` and block until you answer with `approve`, `approve_remember` or `deny`, optionally editing the proposed arguments first in the `InflightApprovalCard`.
+
+### Crafts: engine-authored live UI
+
+When the agent calls `render_ui(description)`, `authorCraft()` (`lib/crafts/authoring.ts`) runs two phases. First it **resolves IDs** (up to 3 read-only lookups to bind drill-in tools to *real* IDs), then it **authors** (streams one sanitized `<craft>` HTML tag plus a `<craft-live>` JSON sidecar). The craft is wired by `data-craft-*` attributes and rendered by `CraftRenderer` (`components/crafts/CraftRenderer.tsx`):
+
+- **Data polls in.** Bound targets fill on each tick via `textContent` / `.value`, never `innerHTML`.
+- **Edits save out.** A ~1s debounce or a blur fires a mechanical write, with no approval modal.
+
+All authored HTML is sanitized: `<script>`, `<iframe>`, `<form>`, inline event handlers and `javascript:` URLs are stripped before the craft reaches the DOM.
+
+### Channels: one poll, many subscribers
+
+The channel subsystem (`lib/channels/*`, `app/api/channel/*`) carries the live data. A `Channel` is one poll loop, a rev-stamped frame buffer and a set of subscribers, keyed by a deterministic hash of `{ provider, channel, args }`. Identical subscriptions hash the same and share one channel, so many crafts watching one resource poll it once. The poll interval follows the tightest subscriber's `poll_s` (floored at 500 ms), and a channel is dropped 20 s after its last unsubscribe. The agent does **not** reason per poll tick: there is no LLM call per data frame.
+
+### The `/generate` studio
+
+`/generate` is a separate one-shot "prompt to app" surface with no agent loop. You describe a dashboard in plain English and `generateCraft()` (`lib/mcpdeck/generate.ts`) emits a validated JSON `CraftSpec` of themed blocks (`stat | table | list | source | text`) bound to live tools. Unlike the agent's HTML crafts, studio data sources refresh on demand, and writes go through a per-action approval modal with editable JSON args. A sandboxed `CraftSession` only lets the tool IDs declared in the spec run.
+
+### Real MCP integration vs. mock fallback
+
+The engine and UI sit on a provider abstraction (`lib/mcpdeck/provider.ts`, `real-client.ts`), so they don't care where tools come from. Set `MCPDECK_SERVERS` to a JSON array of stdio server configs and each server starts only if its required credential is present, connecting in parallel under a 45 s timeout. It handles Windows, where `npx` / `npm` resolve to their `.cmd` shims. With no servers configured, the app runs on built-in mock servers (a `git` server with status/log/diff/branch and a `linear` server with list/read/create/comment) that return synthesized responses, so you can try the whole flow with zero credentials.
+
+### The two surfaces
 
 | Route | Component | Purpose |
-|---|---|---|
-| `/` | `McpDeckPanel` | Agent mode with a live trace, approval cards and inline crafts, plus Apps mode with read-only dashboards per server |
-| `/generate` | `CraftStudio` | Prompt to app studio |
+|-------|-----------|---------|
+| `/` | `McpDeckPanel` | The main cockpit. **Agent mode**: goal, then an autonomous multi-step run with a live reasoning + tool trace, approval cards and inline craft panels. **Apps mode**: read-only live dashboards per connected server. |
+| `/generate` | `CraftStudio` | Prompt-to-app studio. One-shot `CraftSpec` (JSON) authoring, no agent loop. |
 
-## Stack
+## Tech Stack
 
-TypeScript, Next.js 15 (App Router), React 19, Tailwind CSS 3, `@modelcontextprotocol/sdk`, `@anthropic-ai/sdk`, `openai`, `@google/generative-ai`, Playwright (dev dependency), server-sent events for the agent stream.
+- **Language:** TypeScript 5.7 (strict)
+- **Framework:** Next.js 15 (App Router), React 19
+- **Styling:** Tailwind CSS 3.4 with CSS-variable light/dark theming; `lucide-react` icons
+- **Agent / protocol:** `@modelcontextprotocol/sdk` 1.29 (MCP over stdio); custom operating-procedure agent loop
+- **LLM providers:** `@anthropic-ai/sdk`, `openai`, `@google/generative-ai` behind one provider-agnostic interface
+- **Live data:** server-sent events for the agent stream; a deduplicated channel/poll subsystem for craft data
+- **Tooling:** Playwright is in the dependencies, but the repo has no tests
 
-## Setup
+## Getting Started
 
-Needs Node 18+ and an LLM API key. `ANTHROPIC_API_KEY` is enough to drive the agent.
+### Prerequisites
+
+- Node.js 18+ and npm
+- An LLM API key (an `ANTHROPIC_API_KEY` is enough to drive the agent)
+- Optional: credentials for any real MCP servers you want to connect (GitHub PAT, Notion token, Linear API key, Slack bot token + team ID)
+
+### Installation
 
 ```bash
 git clone https://github.com/DCode-v05/MCP-Deck.git
 cd MCP-Deck
 npm install
+```
+
+### Configure environment
+
+```bash
 cp .env.local.example .env.local
-npm run dev
 ```
 
-Open http://localhost:3000. To use real accounts, set `MCPDECK_SERVERS` and the matching credentials in `.env.local` (`GITHUB_PERSONAL_ACCESS_TOKEN`, `NOTION_TOKEN`, `LINEAR_API_TOKEN`, `SLACK_BOT_TOKEN` with `SLACK_TEAM_ID`). `.env.local.example` has a sample config. The package names in it may differ from the MCP servers you have installed. Other scripts are `npm run build`, `npm start` and `npm run lint`.
+Edit `.env.local`. The only thing you need to use the agent is an `ANTHROPIC_API_KEY`. To go live against real accounts, set `MCPDECK_SERVERS` (a JSON array of stdio MCP server configs) plus each server's credential, for example `GITHUB_PERSONAL_ACCESS_TOKEN`, `NOTION_TOKEN`, `LINEAR_API_TOKEN`, `SLACK_BOT_TOKEN` + `SLACK_TEAM_ID`. The example file has a sample config, but the package names in it can differ from the MCP servers you have installed, so check them. Leave `MCPDECK_SERVERS` unset to run on the built-in mock servers.
 
-## Project structure
+### Running
+
+```bash
+npm run dev          # http://localhost:3000
+
+# production build
+npm run build
+npm start
+```
+
+`package.json` also has `npm run lint` (`next lint`), but ESLint isn't a listed dependency and there is no ESLint config in the repo, so it may not work out of the box.
+
+## Usage
+
+- Open `http://localhost:3000` and, in **Agent mode**, type a short cross-app goal. Watch the trace as the agent surveys, plans and acts, and approve or edit any write it proposes.
+- Ask the agent for a dashboard or control panel and it will author a **live craft**: data polls in, your edits save back, no buttons.
+- Switch to **Apps mode** to browse read-only live dashboards per connected server.
+- Visit `/generate` to one-shot a JSON `CraftSpec` app from a plain-English description, with manual refresh and an approval modal for writes.
+- Reopen or replay a past run from the history list, or branch a fresh run seeded with context you already gathered.
+
+## Project Structure
 
 ```
-app/                  pages (/ and /generate) and API routes
-  api/mcpdeck/        agent session, stream, input, catalogue, history, generate, craft/run
-  api/channel/        subscribe, call, request, per-session stream and refresh
-  api/crafts/author/  live HTML craft authoring
-components/mcpdeck/   panel, live trace, approval card, server panel, tool inspector, usage, studio, apps/
-components/crafts/    CraftRenderer
-lib/mcpdeck/          engine, session, provider, real MCP client, catalogue, generate studio
-lib/channels/         channel, manager, wire, sources
-lib/crafts/           authoring, craft block and parser, thread store
-lib/engine/providers/ anthropic, google, openai
-lib/hooks/            useMcpDeck, useChannel, useCraft, useServerDashboard
+MCP-Deck/
+├── app/
+│   ├── page.tsx                       # Root surface: McpDeckPanel
+│   ├── generate/page.tsx              # Craft studio (prompt → app)
+│   ├── layout.tsx  globals.css        # Shell + theme
+│   └── api/
+│       ├── mcpdeck/                   # Agent + session + studio routes
+│       │   ├── start/ stream/ input/ catalogue/ history/
+│       │   ├── generate/              # /generate authoring (CraftSpec JSON)
+│       │   └── craft/run/             # /generate tool execution
+│       ├── channel/                   # Bidirectional poll + push
+│       │   ├── subscribe/  call/  request/[key]/
+│       │   └── [sessionId]/stream/  [sessionId]/refresh/
+│       ├── crafts/author/             # Author a live HTML craft
+│       └── execute/                   # route:engine resume
+│
+├── components/
+│   ├── mcpdeck/
+│   │   ├── McpDeckPanel.tsx           # Root cockpit (mode switch, rails, composer)
+│   │   ├── ModelProcessing.tsx        # Live trace: reasoning + tools + crafts
+│   │   ├── InflightApprovalCard.tsx   # Editable-args approve/deny card for writes
+│   │   ├── ServerPanel.tsx            # Server health + on/off toggles
+│   │   ├── ToolInspector.tsx          # Searchable, pinnable tool list
+│   │   ├── UsageDashboard.tsx         # Cost / tokens / per-server metrics
+│   │   ├── CraftStudio.tsx            # /generate UI (CraftSpec, approval modal)
+│   │   └── apps/                      # Apps-mode read-only dashboards + kit
+│   └── crafts/CraftRenderer.tsx       # Live HTML-craft renderer (bind + auto-save)
+│
+├── lib/
+│   ├── mcpdeck/                       # Agent + sessions + providers
+│   │   ├── engine.ts                  # runMcpDeck loop, OPERATING_PROCEDURE, render_ui
+│   │   ├── session.ts                 # McpDeckSession (SSE bus, approval gate, usage)
+│   │   ├── provider.ts  real-client.ts# Provider abstraction + real MCP stdio client
+│   │   ├── catalogue.ts  tool-runner.ts # Mock catalogue + mock tool execution
+│   │   ├── craft.ts  generate.ts  craft-session.ts  # /generate studio
+│   │   ├── types.ts                   # Shared types
+│   │   └── apps/dashboards.ts         # Apps-mode dashboard definitions
+│   ├── channels/                      # One poll, many subscribers
+│   │   └── channel.ts  manager.ts  ref.ts  wire.ts  sources.ts
+│   ├── crafts/                        # Engine-authored live UI (HTML crafts)
+│   │   └── authoring.ts  craft-block.ts  craft-parser.ts  thread-store.ts
+│   ├── engine/
+│   │   ├── providers/                 # anthropic.ts  google.ts  openai.ts  index.ts  types.ts
+│   │   └── tools/                     # index.ts  types.ts
+│   └── hooks/                         # useMcpDeck  useChannel  useCraft  useServerDashboard
+│
+├── next.config.ts  tsconfig.json  tailwind.config.ts  postcss.config.mjs
+├── package.json  package-lock.json
+├── .env.local.example
+├── .gitignore
+└── README.md
 ```
+
+---
 
 ## Contact
 
-Denistan B: [portfolio](https://www.denistan.me), [LinkedIn](https://www.linkedin.com/in/denistanb), denistanb05@gmail.com
+<table>
+  <tr><td><b>Portfolio:</b> <a href="https://www.denistan.me">Denistan</a></td><td><b>LinkedIn:</b> <a href="https://www.linkedin.com/in/denistanb">denistanb</a></td></tr>
+  <tr><td><b>GitHub:</b> <a href="https://github.com/DCode-v05">DCode-v05</a></td><td><b>LeetCode:</b> <a href="https://leetcode.com/u/Denistan_B">Denistan_B</a></td></tr>
+  <tr><td colspan="2" align="center"><b>Email:</b> <a href="mailto:denistanb05@gmail.com">denistanb05@gmail.com</a></td></tr>
+</table>
+
+Made with ❤️ by **Denistan B**
